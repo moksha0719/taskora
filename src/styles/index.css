@@ -1,0 +1,102 @@
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: var(--border-subtle);
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text-main);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    color: var(--color-text-heading);
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Custom styled scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary-light);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* Soft card utility */
+.card-soft {
+  background-color: var(--color-surface);
+  border-radius: var(--radius-card, 26px);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-lavender);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-soft-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lavender-lg);
+}
+
+/* Button Lavender gradient */
+.btn-primary-gradient {
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
+  color: #FFFFFF;
+  box-shadow: 0 4px 16px rgba(152, 133, 232, 0.25);
+  transition: all 0.2s ease;
+}
+
+.btn-primary-gradient:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(152, 133, 232, 0.35);
+}
+
+.btn-primary-gradient:active {
+  transform: translateY(0);
+}
+
+/* Rounded pastel icon box */
+.icon-box-purple {
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.icon-box-pink {
+  background-color: var(--color-accent-pink);
+  color: var(--color-accent-pink-text);
+}
+
+.icon-box-mint {
+  background-color: var(--color-accent-mint);
+  color: var(--color-accent-mint-text);
+}
+
+.icon-box-peach {
+  background-color: var(--color-accent-peach);
+  color: var(--color-accent-peach-text);
+}
+
+.icon-box-blue {
+  background-color: var(--color-accent-blue);
+  color: var(--color-accent-blue-text);
+}

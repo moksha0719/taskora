@@ -1,0 +1,81 @@
+:root {
+  /* ========================================================
+     LAVENDER DREAM DESIGN SYSTEM - CORE TOKENS
+     ======================================================== */
+  --color-primary: #9885E8;
+  --color-primary-hover: #8671DF;
+  --color-primary-light: #C7B9F5;
+  --color-primary-subtle: #EDE8FC;
+  
+  --color-bg: #F5F1FF;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #FBF9FF;
+  --color-sidebar: #F8F5FE;
+  
+  --color-text-main: #55458A;
+  --color-text-muted: #A99CCB;
+  --color-text-heading: #3B2E6A;
+  
+  --color-accent-pink: #F7DDED;
+  --color-accent-pink-text: #9B4D7D;
+  
+  --color-accent-mint: #DDF3E9;
+  --color-accent-mint-text: #2D7C5D;
+  
+  --color-accent-peach: #FEF3D6;
+  --color-accent-peach-text: #A86B12;
+  
+  --color-accent-blue: #E8F1FF;
+  --color-accent-blue-text: #376EC4;
+
+  --border-subtle: #E8E0FA;
+  --border-focus: #9885E8;
+  
+  --shadow-lavender-sm: 0 4px 14px rgba(152, 133, 232, 0.08);
+  --shadow-lavender: 0 10px 28px rgba(152, 133, 232, 0.12);
+  --shadow-lavender-lg: 0 16px 36px rgba(152, 133, 232, 0.18);
+  
+  --radius-card: 26px;
+  --radius-button: 16px;
+  --radius-pill: 9999px;
+
+  --font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-decorative: 'Quicksand', system-ui, sans-serif;
+}
+
+/* Dark mode variant (WCAG AA compliant) */
+.dark {
+  --color-primary: #A493F0;
+  --color-primary-hover: #B5A6F7;
+  --color-primary-light: #524185;
+  --color-primary-subtle: #2A2149;
+  
+  --color-bg: #130E26;
+  --color-surface: #1E163B;
+  --color-surface-hover: #261D4A;
+  --color-sidebar: #181131;
+  
+  --color-text-main: #F3EFFF;
+  --color-text-muted: #A89DC7;
+  --color-text-heading: #FFFFFF;
+  
+  --color-accent-pink: #3D2235;
+  --color-accent-pink-text: #FFB3E0;
+  
+  --color-accent-mint: #1B382C;
+  --color-accent-mint-text: #8BE4BC;
+  
+  --color-accent-peach: #3D2F17;
+  --color-accent-peach-text: #FFD480;
+  
+  --color-accent-blue: #1C2B47;
+  --color-accent-blue-text: #96C2FF;
+
+  --border-subtle: #302456;
+  --border-focus: #A493F0;
+  
+  --shadow-lavender-sm: 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-lavender: 0 10px 28px rgba(0, 0, 0, 0.45);
+  --shadow-lavender-lg: 0 16px 36px rgba(0, 0, 0, 0.6);
+}
