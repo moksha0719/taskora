@@ -38,6 +38,7 @@ export const TasksPage: React.FC = () => {
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -204,7 +205,11 @@ export const TasksPage: React.FC = () => {
               <span>List</span>
             </button>
             <button
-              onClick={() => setViewMode('board')}
+              onClick={() => {
+                setViewMode('board');
+                setIsSelectionMode(false);
+                setSelectedIds([]);
+              }}
               className={cn(
                 'p-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all',
                 viewMode === 'board'
@@ -216,6 +221,21 @@ export const TasksPage: React.FC = () => {
               <span>Board</span>
             </button>
           </div>
+
+          {viewMode === 'list' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              pill
+              onClick={() => {
+                setIsSelectionMode(!isSelectionMode);
+                if (isSelectionMode) setSelectedIds([]);
+              }}
+              aria-label={isSelectionMode ? 'Finish selecting tasks' : 'Select tasks'}
+            >
+              {isSelectionMode ? 'Done' : 'Select'}
+            </Button>
+          )}
 
           <Button variant="primary" size="sm" pill onClick={openCreateModal}>
             <Plus className="w-4 h-4" />
@@ -330,18 +350,21 @@ export const TasksPage: React.FC = () => {
                 )}
               >
                 <div className="flex items-center gap-3.5 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedIds([...selectedIds, task.id]);
-                      } else {
-                        setSelectedIds(selectedIds.filter((id) => id !== task.id));
-                      }
-                    }}
-                    className="w-4 h-4 rounded text-primary focus:ring-primary/40 border-subtle cursor-pointer"
-                  />
+                  {isSelectionMode && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds([...selectedIds, task.id]);
+                        } else {
+                          setSelectedIds(selectedIds.filter((id) => id !== task.id));
+                        }
+                      }}
+                      aria-label={`Select ${task.title}`}
+                      className="w-4 h-4 rounded text-primary focus:ring-primary/40 border-subtle cursor-pointer"
+                    />
+                  )}
 
                   {/* Toggle completion button */}
                   <button
