@@ -1,194 +1,283 @@
-# Taskora 🌸
-### *Organize Your Life. Focus on Your Goals. Achieve More.*
+# Taskora
 
-Taskora is an AI-powered personal productivity and study-management web application designed for university students and knowledge workers. It combines intelligent study timetable planning, focus sessions, daily habit tracking, rich academic workspaces, and structured AI action proposals in a calm, aesthetically cohesive environment.
+*Organize Your Life. Focus on Your Goals. Achieve More.*
 
----
+Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-## 🎨 Visual Identity — "Lavender Dream"
+> **Project status:** The frontend is an interactive prototype. Its typed API layer currently uses browser `localStorage` and mock data. The Express backend is an initial starter with a single `GET /` route. PostgreSQL, Prisma, JWT authentication, feature APIs, and server-side AI integration are planned, not implemented. The feature descriptions below preserve the existing product scope; they should not be read as proof that every scenario has been tested or that data is backed by a server.
 
-Taskora strictly implements the **Lavender Dream** design system across all views, referencing soft pastel 3D UI aesthetics with generous padding, large rounded cards (24–28px), and accessible contrast:
+## Current features and prototype scope
 
-- **Primary Lavender:** `#9885E8`
-- **Soft Lilac:** `#C7B9F5`
-- **Dreamy Background:** `#F5F1FF`
-- **Pure White Surfaces:** `#FFFFFF`
-- **Deep Purple Typography:** `#55458A`
-- **Muted Purple Secondary:** `#A99CCB`
-- **Soft Pink (Warm / In Progress Cards):** `#F7DDED`
-- **Mint Accent (Completed / Streaks):** `#DDF3E9`
-- **Soft Peach / Amber (Focus Time Cards):** `#FEF3D6`
-- **Soft Blue (Calendar Cards):** `#E8F1FF`
-- **Dark Mode:** Deep purple surfaces (`#1E163B`), lavender accents, and WCAG AA contrast compliance.
-- **Mascot Companion:** *Bramble the Bunny* (encouraging motivation cards, empty states, and celebrations).
+The existing frontend describes these screens and interactions:
 
----
-
-## 🚀 Features & SRS Requirements Coverage (FR-01 to FR-20)
-
-| Requirement | Module / Page | Highlights |
+| Requirement | Route | Frontend scope |
 |---|---|---|
-| **FR-01** Authentication | `/login`, `/register`, `/forgot-password` | Form validation, password strength meter, quick demo switcher (Student / Admin). |
-| **FR-02** Dashboard | `/dashboard` | Exact visual match to reference: 4 pastel stat cards, productivity line chart with "Great job! 🎉" marker, to-do list with quick add, mini calendar, recent activity feed, and bunny motivation card. |
-| **FR-03** AI Assistant | `/ai-assistant` | Conversational interface with **Structured Proposals** (Approve / Edit / Reject). *Nothing is saved until approved*. |
-| **FR-04** Tasks Management | `/tasks` | List + Kanban board views, priority badges, category filters, subtask checklists, and bulk operations. |
-| **FR-05** Smart Study Planner | `/study-planner` | Subject workload input, weekly study targets, conflict-free AI timetable generator. |
-| **FR-06** Focus Mode | `/focus` | Circular progress Pomodoro timer (25/5 min), session subject labeling, ambient sound simulator, and calm Zen mode. |
-| **FR-07** Habit Tracker | `/habits` | Daily single-click check-ins, flame streaks 🔥, and 28-day historical activity heatmap grid. |
-| **FR-08** Analytics | `/analytics` | Period selector (7D, 30D, Semester), focus trend area chart, and course distribution pie chart. |
-| **FR-09** Gamification | `/achievements` | Scholar levels, XP progression bar, badge collection, and immutable XP transaction ledger. |
-| **FR-10** Study Workspace | `/workspace` | Subject categorized notes, rich-text editor, and **Private-by-default** security with explicit share toggles. |
-| **FR-11** Brain Dump | `/brain-dump` | Rapid friction-free thought capture; "Organize with AI" proposal converter for instant review. |
-| **FR-12** Virtual Study Rooms | `/study-rooms` | Public & private study rooms, passcode check, synchronized room Pomodoro timer, participant status, and quiet room chat. |
-| **FR-13** Notifications | `/notifications` | Notification center with deadline, habit, room, and achievement alerts. |
-| **FR-14** Search & Filter | `/search` | Global instant search across tasks, notes, and habits with filter tabs. |
-| **FR-15** Profile & Settings | `/settings` | Profile details, degree major, privacy toggles, password management, and JSON data export. |
-| **FR-16** Administration | `/admin` | Role-gated dashboard: operational overview, student directory, moderation queue, and audit log table. |
-| **FR-17** Theme Management | `/theme-studio` | Predefined palettes (Lavender, Mint, Peach, Midnight, Bubblegum), custom color pickers with WCAG AA warnings, and live preview canvas. |
-| **FR-18** Dashboard Personalization | `/dashboard` | Reorderable widgets with visibility toggles that persist across sessions. |
-| **FR-19** Decorative Personalization | `/theme-studio` | Mascot selector (Bunny, Kitten, Bear, None) and animated sparkle decorations toggle. |
-| **FR-20** Preference Synchronization | LocalStorage API | Cross-session preference persistence with one-click "Reset to Defaults". |
+| **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Form validation, password-strength display, and demo Student/Admin switcher. This is not server authentication. |
+| **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
+| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. Server-side AI and persistent approval are planned. |
+| **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
+| **FR-05 Smart Study Planner** | `/study-planner` | Subject workload, weekly targets, and conflict-free AI timetable UI. A real schedule service is planned. |
+| **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
+| **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
+| **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
+| **FR-09 Gamification** | `/achievements` | Scholar levels, XP progress, badges, and transaction-style history UI. |
+| **FR-10 Study Workspace** | `/workspace` | Subject-organized notes and editor UI with private-by-default and sharing controls. |
+| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. |
+| **FR-12 Virtual Study Rooms** | `/study-rooms` | Public/private room UI, passcode flow, synchronized timer, participants, and quiet chat. |
+| **FR-13 Notifications** | `/notifications` | Notification center UI for deadline, habit, room, and achievement alerts. |
+| **FR-14 Search and Filter** | `/search` | Search UI for tasks, notes, and habits with filter tabs. |
+| **FR-15 Profile and Settings** | `/settings` | Profile/degree details, privacy controls, password-management UI, and JSON export option. |
+| **FR-16 Administration** | `/admin` | Admin-style overview, student directory, moderation queue, and audit-log UI; this is not server-side authorization. |
+| **FR-17 Theme Management** | `/theme-studio` | Lavender, Mint, Peach, Midnight, and Bubblegum palettes; custom colors, contrast warnings, and live preview. |
+| **FR-18 Dashboard Personalization** | `/dashboard` | Widget visibility and ordering controls with browser persistence. |
+| **FR-19 Decorative Personalization** | `/theme-studio` | Mascot options (Bunny, Kitten, Bear, None) and decoration toggle. |
+| **FR-20 Preference Synchronization** | Across the app | LocalStorage persistence and reset-to-defaults UI; cross-device synchronization is not implemented. |
 
----
+## Visual identity: Lavender Dream
 
-## 🛠️ Technology Stack
+The frontend uses a soft pastel visual system with rounded cards, generous spacing, and accessible contrast as a design goal:
 
-- **Framework:** React 18 + TypeScript + Vite
-- **Routing:** React Router v6
-- **Styling:** Tailwind CSS + Custom CSS Design Tokens (`tokens.css`)
-- **Icons:** Lucide Icons (soft rounded style)
-- **Charts:** Recharts (responsive area and pie charts)
-- **Transitions:** Framer Motion & CSS cubic-bezier easing
-- **Delight & Gamification:** Canvas-Confetti & Web Audio API chimes
-- **Architecture:** Typed Mock API layer (`src/lib/api/*`) for immediate backend swapping with zero UI changes.
+- Primary lavender: `#9885E8`; soft lilac: `#C7B9F5`
+- Background: `#F5F1FF`; white surface: `#FFFFFF`
+- Deep purple text: `#55458A`; muted purple: `#A99CCB`
+- Pink: `#F7DDED`; mint: `#DDF3E9`; peach/amber: `#FEF3D6`; blue: `#E8F1FF`
+- Dark-mode surface: `#1E163B`
+- Mascot: Bramble the Bunny
 
----
+## Technology stack
 
-## 📁 Directory Structure
+| Area | Technology | Status |
+|---|---|---|
+| Frontend | React 18, TypeScript, Vite, React Router | Present |
+| Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
+| Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
+| Frontend data layer | Typed mock API and browser `localStorage` | Present; not connected to Express |
+| Backend | Node.js, Express, CORS, dotenv | Starter server present |
+| Database | PostgreSQL | Planned; no schema or database connection yet |
+| ORM | Prisma | Planned; not configured yet |
+| Authentication | Password hashing and JWT | Planned; current sign-in is a frontend demo |
+| AI integration | Provider API called from the backend | Planned; keep provider keys server-side |
 
-```
+## Architecture
+
+### Current implementation
+
+1. The browser runs the React application using Vite.
+2. Pages call the typed API functions in `src/lib/api/client.ts`.
+3. Those functions use mock data, simulated delays, and browser `localStorage`.
+4. The Express server in `backend/src/server.js` has JSON parsing, permissive CORS, and a basic `GET /` response. The frontend does not currently call it.
+
+### Planned architecture
+
+The intended production data flow is:
+
+`React UI → typed frontend API client → Express routes/controllers/services → Prisma → PostgreSQL`
+
+Authentication, authorization, input validation, and AI provider calls will be handled server-side. The frontend should never contain database credentials, JWT signing secrets, or AI provider keys. See [BACKEND_PLAN.md](./BACKEND_PLAN.md) for milestones and checks.
+
+## Project structure
+
+```text
 taskora/
+├── backend/
+│   ├── src/
+│   │   └── server.js             # Express starter; currently only GET /
+│   ├── package.json
+│   ├── package-lock.json
+│   └── .env                      # Local only; do not commit
 ├── public/
 │   └── favicon.svg
 ├── src/
 │   ├── components/
-│   │   ├── ai/
-│   │   │   └── ProposalCard.tsx       # AI Reviewable Actions (Approve / Reject)
-│   │   ├── common/
-│   │   │   ├── Badge.tsx              # Status & Priority badges
-│   │   │   ├── Button.tsx             # Lavender gradient button
-│   │   │   ├── Card.tsx               # Soft rounded surface card
-│   │   │   ├── EmptyState.tsx         # Bunny mascot empty state
-│   │   │   ├── MascotBunny.tsx        # Multi-expression SVG mascot
-│   │   │   ├── Modal.tsx              # Accessible dialog overlay
-│   │   │   ├── ProgressRing.tsx       # Circular Pomodoro SVG timer
-│   │   │   ├── Skeleton.tsx           # Soft loading shimmer
-│   │   │   └── StatCard.tsx           # 3D pastel stat cards
-│   │   ├── dashboard/
-│   │   │   ├── SemesterCalendarWidget.tsx # Interactive calendar with color dots
-│   │   │   ├── PomodoroWidget.tsx         # Circular ring + aesthetic potted plant
-│   │   │   ├── FlashcardWidget.tsx        # Q&A flip card + note generator
-│   │   │   ├── ExamPrepWidget.tsx         # Preparedness gauge + priority topic bars
-│   │   │   ├── StudyChecklistWidget.tsx   # Study checklist + AI question generator
-│   │   │   ├── BunnyMotivationCard.tsx
-│   │   │   ├── ProductivityChart.tsx
-│   │   │   ├── RecentActivityWidget.tsx
-│   │   │   ├── TodoWidget.tsx
-│   │   │   └── WidgetCustomizeModal.tsx
-│   │   ├── layout/
-│   │   │   ├── AppShell.tsx
-│   │   │   ├── Sidebar.tsx
-│   │   │   └── TopBar.tsx
-│   │   └── theme/
-│   │       ├── ContrastWarning.tsx    # Live WCAG AA contrast ratio tester
-│   │       └── LiveThemePreview.tsx   # Interactive miniature mockup
-│   ├── context/
-│   │   ├── AuthContext.tsx            # Session, student & admin roles
-│   │   └── ThemeContext.tsx           # Dynamic CSS token injector & dark mode
+│   │   ├── ai/                   # AI proposal UI
+│   │   ├── common/               # Reusable UI components
+│   │   ├── dashboard/            # Dashboard widgets
+│   │   ├── layout/               # App shell, sidebar, top bar
+│   │   └── theme/                # Theme preview and contrast UI
+│   ├── context/                  # Authentication-demo and theme contexts
 │   ├── lib/
-│   │   ├── api/
-│   │   │   └── client.ts              # Fully-typed persistent mock API
-│   │   ├── mockData.ts                # Rich seed dataset
-│   │   └── utils.ts                   # Helpers & audio chime synthesis
-│   ├── pages/
-│   │   ├── auth/
-│   │   │   ├── ForgotPasswordPage.tsx
-│   │   │   ├── LoginPage.tsx
-│   │   │   └── RegisterPage.tsx
-│   │   ├── AchievementsPage.tsx
-│   │   ├── AdminPage.tsx
-│   │   ├── AIAssistantPage.tsx
-│   │   ├── AnalyticsPage.tsx
-│   │   ├── BrainDumpPage.tsx
-│   │   ├── CalendarPage.tsx
-│   │   ├── DashboardPage.tsx
-│   │   ├── FocusPage.tsx
-│   │   ├── HabitsPage.tsx
-│   │   ├── LandingPage.tsx
-│   │   ├── NotFoundPage.tsx
-│   │   ├── NotificationsPage.tsx
-│   │   ├── SearchPage.tsx
-│   │   ├── SettingsPage.tsx
-│   │   ├── StudyPlannerPage.tsx
-│   │   ├── StudyRoomsPage.tsx
-│   │   ├── ThemeStudioPage.tsx
-│   │   └── WorkspacePage.tsx
-│   ├── styles/
-│   │   ├── index.css
-│   │   └── tokens.css                 # Central Lavender Dream CSS tokens
-│   ├── types/
-│   │   └── index.ts                   # Complete TypeScript schema
+│   │   ├── api/                  # Typed mock API and its acceptance test
+│   │   └── mockData.ts
+│   ├── pages/                    # App routes and page components
+│   ├── styles/                   # Global CSS and design tokens
+│   ├── types/                    # Shared TypeScript types
 │   ├── App.tsx
 │   └── main.tsx
-├── .env.example
+├── .env.example                  # Root reference for frontend and planned settings
 ├── package.json
+├── package-lock.json
+├── vite.config.ts
 ├── tailwind.config.js
-└── tsconfig.json
+├── tsconfig.json
+└── BACKEND_PLAN.md
 ```
 
----
+`node_modules`, generated build output, and local secret files are omitted from this tree. The backend `.env` shown above is machine-local and must not be added to version control.
 
-## 💻 Local Setup & Development
+## Prerequisites
 
-### 1. Prerequisites
-- **Node.js** v18+ or v20+
-- **npm** v9+
+- Node.js 18+ (or a compatible current LTS release)
+- npm
+- PostgreSQL is needed for the planned database work; the current frontend prototype and starter `GET /` route do not require a database.
 
-### 2. Installation
+## Installation and setup
+
+From the repository root:
+
 ```bash
-cd taskora
 npm install
 ```
 
-### 3. Launch Development Server
+For the backend, open a second terminal:
+
+```bash
+cd backend
+npm install
+```
+
+These install the dependencies declared by the respective package manifests. The root and backend are separate npm projects.
+
+## Environment variables
+
+The root [.env.example](./.env.example) is a reference file containing frontend settings and placeholders for planned backend settings. It is not a backend configuration template. Do not copy real credentials into source control, and do not paste secret values into this README.
+
+### Frontend
+
+Create a root `.env` for local Vite settings as needed. The existing example names `VITE_HOST`, `VITE_PORT`, and `VITE_API_BASE_URL`. Variables prefixed with `VITE_` are intended for frontend use and may be included in browser code; **never put secrets in them**.
+
+The frontend currently continues to use its mock API and local storage. Setting an API URL alone does not connect it to the backend.
+
+### Backend
+
+The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. When running the backend commands below from `backend/`, create `backend/.env` for local settings. For the starter server, `PORT` is optional and defaults to `5000`. Future database, JWT, and AI features will need server-only variables such as:
+
+```dotenv
+PORT=5000
+DATABASE_URL=postgresql://<USER>:<PASSWORD>@localhost:5432/taskora?schema=public
+JWT_SECRET=<generate-a-long-random-secret>
+AI_API_KEY=<your-provider-key>
+AI_MODEL_NAME=<provider-model-name>
+```
+
+These are variable names and placeholders, not working credentials. Do not commit `.env` files. Keep `DATABASE_URL`, `JWT_SECRET`, and AI provider keys out of frontend variables and client-side code.
+
+## Running the application
+
+### Frontend
+
+From the repository root:
+
 ```bash
 npm run dev
 ```
-The application will start at `http://localhost:5173`.
 
-### 4. Build for Production
+Vite normally serves the app at `http://localhost:5173`. To create and locally preview a production build:
+
 ```bash
 npm run build
+npm run preview
 ```
-Generates production-optimized assets in `taskora/dist`.
 
----
+The build output is written to `dist/`.
 
-## 🧪 Acceptance Test Verification (TC01–TC14)
+### Backend
 
-All scenarios from Section 11 of the SRS have been implemented and verified:
+In a separate terminal:
 
-- **TC01 (Registration & Login):** Register with valid credentials, password strength meter evaluates criteria, session persists.
-- **TC02 (Task CRUD):** Tasks can be created, marked complete (triggering celebratory confetti), edited, filtered, and deleted.
-- **TC03 (AI Task Request):** AI Assistant parses natural prompts and returns structured `AIProposal` objects.
-- **TC04 (Approve AI Proposal):** Actions are only committed to the database after explicit "Approve & Save" click.
-- **TC05 (Focus Mode):** Configurable circular timer runs, records session history, and awards XP.
-- **TC06 (Habit Check-in):** Daily check-in updates streak counter and preserves historical 28-day log without overwriting.
-- **TC07 (Study Plan):** AI schedule generator distributes weekly study hours across subjects into a timetable.
-- **TC08 (Brain Dump):** Unstructured text captures instantly and can be converted into structured proposals.
-- **TC09 (Gamification):** XP is awarded with source attribution and duplicate prevention in an audited ledger.
-- **TC10 (Study Rooms):** Private study rooms require passcode validation (`1234`) before granting access.
-- **TC11 (Analytics):** Metric cards and area/pie charts calculate accurate focus hours and completion rates.
-- **TC12 (Authorization):** Role-based access protects `/admin` routes.
-- **TC13 (Theme Preferences):** Custom colors, card borders, and dark mode persist across browser reloads.
-- **TC14 (Dashboard Customization):** Widgets can be hidden or reordered via the layout modal and persist automatically.
+```bash
+cd backend
+npm run dev
+```
+
+This runs the starter server with nodemon, normally at `http://localhost:5000`. To run without nodemon:
+
+```bash
+npm start
+```
+
+At this stage the server only returns a status message from `GET /`; it does not yet expose application data APIs.
+
+## PostgreSQL and Prisma setup
+
+PostgreSQL and Prisma are part of the planned stack but are **not configured in the current backend**. There is no Prisma dependency, schema, migration, or database client yet.
+
+For local preparation:
+
+1. Install and start PostgreSQL using the instructions for your operating system.
+2. Create a development database, for example by connecting with `psql` and running `CREATE DATABASE taskora;`.
+3. Add a local `DATABASE_URL` to `backend/.env`, using the placeholder format shown above and your own local PostgreSQL username/password.
+4. Follow the PostgreSQL/Prisma setup milestone in [BACKEND_PLAN.md](./BACKEND_PLAN.md) before running Prisma commands. Commands such as `prisma migrate dev` are not available until Prisma is installed and configured.
+
+Use a separate database for tests and production. Never put real database credentials in source files or commit them.
+
+## API documentation
+
+### Currently implemented
+
+The Express server's only route is:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | Returns a JSON message indicating the starter server is running. |
+
+Local base URL: `http://localhost:5000`. There are no task, authentication, planner, notification, or AI API endpoints yet. The frontend currently uses the mock API described above.
+
+### Planned API areas
+
+The backend roadmap will define and implement API contracts incrementally, beginning with registration/login and task CRUD, then Brain Dump/AI, study planning, and notifications. Request and response schemas, authentication requirements, error formats, and endpoint examples should be documented alongside each implemented API; do not treat planned routes as available endpoints.
+
+## Testing and acceptance scenarios
+
+The root package currently defines `npm run build`; it does not define a test script. `src/lib/api/srsAcceptance.test.ts` is present, but the README does not claim that all acceptance scenarios have been run. The backend currently has no test suite.
+
+The original README listed the following SRS acceptance scenarios. They are retained as product checks, **not as a claim that they have all been run or that the backend supports them**. Add frontend, API, and database tests as those layers are implemented.
+
+- **TC01 Registration and login:** register with valid credentials, evaluate password strength, and persist the demo session.
+- **TC02 Task CRUD:** create, complete, edit, filter, and delete tasks; completion may trigger confetti.
+- **TC03 AI task request:** turn a natural-language request into a structured proposal.
+- **TC04 Approve AI proposal:** only save a proposed action after explicit approval.
+- **TC05 Focus mode:** run a configurable timer, record a session, and award XP.
+- **TC06 Habit check-in:** update a daily streak while retaining historical check-ins.
+- **TC07 Study plan:** distribute weekly study hours across subjects.
+- **TC08 Brain Dump:** capture unstructured text and propose an organized result.
+- **TC09 Gamification:** attribute XP to its source and avoid duplicate awards.
+- **TC10 Study rooms:** validate a private-room passcode before joining.
+- **TC11 Analytics:** calculate focus-time and completion metrics for charts.
+- **TC12 Authorization:** protect admin operations by role on the server (planned).
+- **TC13 Theme preferences:** persist custom colors, card borders, and dark mode.
+- **TC14 Dashboard customization:** persist widget visibility and ordering.
+
+## Development roadmap
+
+The implementation order is summarized below. Each phase has tasks, file suggestions, outcomes, testing requirements, and a checklist in [BACKEND_PLAN.md](./BACKEND_PLAN.md).
+
+1. Backend structure and API planning
+2. PostgreSQL and Prisma setup
+3. Database schema and migrations
+4. Registration/login, password hashing, and JWT
+5. Task management CRUD APIs
+6. Brain Dump and backend AI integration
+7. Smart Study Planner
+8. Notifications
+9. Validation, error handling, and testing
+10. Frontend API integration
+11. Security improvements and deployment
+
+## Team contribution overview
+
+Contributors can share or rotate these responsibilities; no individual assignments are assumed:
+
+- **Frontend:** maintain React pages and types, integrate API calls, and cover loading/error/empty states.
+- **Backend:** define Express routes and services, enforce authentication/authorization, validate inputs, and write API tests.
+- **Database:** review Prisma models, migrations, constraints, and seed/test data.
+- **AI integration:** keep provider calls server-side, validate structured results, and test approval flows.
+- **Quality and documentation:** verify setup on a clean checkout, run relevant builds/tests, and keep API/roadmap documentation current.
+
+Suggested workflow: create a focused branch, keep secrets out of commits, make small changes, run the checks relevant to the change, and request review before merging. Coordinate API contract changes with both frontend and backend contributors.
+
+## Contributing and local changes
+
+- Do not commit `.env` files, API keys, passwords, database dumps, or generated dependencies.
+- Keep the mock API working until a backend feature is implemented and tested end-to-end.
+- Update this README and the backend roadmap when project capabilities or setup steps change.
+- Record whether a feature is a frontend prototype, locally integrated API, or production-ready feature; avoid claiming completion based only on a screen existing.
