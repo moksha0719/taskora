@@ -52,7 +52,12 @@ function isValidDate(value) {
 }
 
 function isValidTimeZone(value) {
-    if (typeof value !== "string" || !value.trim() || value !== value.trim()) {
+    if (
+        typeof value !== "string" ||
+        !value.trim() ||
+        value !== value.trim() ||
+        value.length > 64
+    ) {
         return false;
     }
 
