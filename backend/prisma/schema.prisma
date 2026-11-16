@@ -19,6 +19,27 @@ enum TaskPriority {
   HIGH
 }
 
+enum StudyPlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum StudyDayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum ScheduleItemKind {
+  STUDY
+  REVIEW
+}
+
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -27,6 +48,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tasks     Task[]
+  studyPlans StudyPlan[]
 }
 
 model Task {
@@ -45,4 +67,62 @@ model Task {
   @@index([status])
   @@index([priority])
   @@index([dueDate])
+}
+
+model StudyPlan {
+  id                   String          @id @default(uuid()) @db.Uuid
+  userId               String          @db.Uuid
+  activeUserId         String?         @unique @db.Uuid // Set to userId only while ACTIVE; a database check enforces this.
+  title                String
+  status               StudyPlanStatus @default(DRAFT)
+  startDate            DateTime        @db.Date
+  endDate              DateTime        @db.Date
+  timeZone             String          @default("Asia/Colombo") @db.VarChar(64)
+  weeklyTargetMinutes  Int
+  studyDaysPerWeek     Int
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  subjects             StudySubject[]
+
+  @@index([userId, status])
+}
+
+model StudySubject {
+  id                    String          @id @default(uuid()) @db.Uuid
+  planId                String          @db.Uuid
+  name                  String
+  code                  String
+  color                 String          @db.VarChar(7)
+  targetMinutesPerWeek  Int
+  plan                  StudyPlan       @relation(fields: [planId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  scheduleItems         ScheduleItem[]
+
+  @@index([planId])
+}
+
+model ScheduleItem {
+  id                String              @id @default(uuid()) @db.Uuid
+  subjectId         String              @db.Uuid
+  dayOfWeek         StudyDayOfWeek
+  startMinuteOfDay  Int
+  durationMinutes   Int
+  kind              ScheduleItemKind    @default(STUDY)
+  topics            String[]            @default([]) // Required; the migration also enforces NOT NULL.
+  subject           StudySubject        @relation(fields: [subjectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  completions       SessionCompletion[]
+
+  @@index([subjectId, dayOfWeek])
+}
+
+model SessionCompletion {
+  id                    String       @id @default(uuid()) @db.Uuid
+  scheduleItemId        String       @db.Uuid
+  occurrenceDate        DateTime     @db.Date
+  completedAt           DateTime     @default(now())
+  actualDurationMinutes Int? // Optional; the migration requires a positive value when set.
+  scheduleItem          ScheduleItem @relation(fields: [scheduleItemId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([scheduleItemId, occurrenceDate])
+  @@index([occurrenceDate])
 }
