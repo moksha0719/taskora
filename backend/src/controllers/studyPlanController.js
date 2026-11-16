@@ -232,6 +232,23 @@ function createStudyPlanController(
         }
     }
 
+    async function saveSchedule(req, res) {
+        if (!validatePlanId(req, res)) {
+            return;
+        }
+
+        try {
+            const studyPlan = await studyPlanService.replaceStudySchedule(
+                req.user.id,
+                req.params.id,
+                req.body
+            );
+            return res.json({ studyPlan });
+        } catch (error) {
+            return sendServiceError(error, res);
+        }
+    }
+
     async function remove(req, res) {
         if (!validatePlanId(req, res)) {
             return;
@@ -312,6 +329,7 @@ function createStudyPlanController(
         getActive,
         getById,
         update,
+        saveSchedule,
         remove,
         generateSchedulePreview,
         upsertScheduleCompletion,
