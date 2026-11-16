@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const prisma = require("./lib/prisma");
 const createAuthRouter = require("./routes/authRoutes");
+const createTaskRouter = require("./routes/taskRoutes");
 
 function createApp({ prismaClient = prisma } = {}) {
     const app = express();
@@ -16,6 +17,7 @@ function createApp({ prismaClient = prisma } = {}) {
     });
 
     app.use("/api/auth", createAuthRouter(prismaClient));
+    app.use("/api/tasks", createTaskRouter(prismaClient));
 
     app.use((error, req, res, next) => {
         if (error.type === "entity.parse.failed") {
