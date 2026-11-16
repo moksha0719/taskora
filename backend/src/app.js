@@ -7,11 +7,18 @@ const createAiRouter = require("./routes/aiRoutes");
 const geminiService = require("./services/geminiService");
 const createBrainDumpRouter = require("./routes/brainDumpRoutes");
 const brainDumpService = require("./services/brainDumpService");
+const createStudyPlanRouter = require("./routes/studyPlanRoutes");
+const defaultStudyPlanService = require("./services/studyPlanService");
+const defaultStudyScheduleService = require("./services/studyScheduleService");
+const defaultScheduleCompletionService = require("./services/scheduleCompletionService");
 
 function createApp({
     prismaClient = prisma,
     aiService = geminiService,
-    brainDumpProcessingService = brainDumpService
+    brainDumpProcessingService = brainDumpService,
+    studyPlanService = defaultStudyPlanService,
+    studyScheduleService = defaultStudyScheduleService,
+    scheduleCompletionService = defaultScheduleCompletionService
 } = {}) {
     const app = express();
 
@@ -28,6 +35,10 @@ function createApp({
     app.use("/api/tasks", createTaskRouter(prismaClient));
     app.use("/api/ai", createAiRouter(aiService));
     app.use("/api/brain-dumps", createBrainDumpRouter(brainDumpProcessingService));
+    app.use(
+        "/api/study-plans",
+        createStudyPlanRouter(studyPlanService, studyScheduleService, scheduleCompletionService)
+    );
 
     app.use((error, req, res, next) => {
         if (error.type === "entity.parse.failed") {
