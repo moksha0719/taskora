@@ -3,8 +3,16 @@ const cors = require("cors");
 const prisma = require("./lib/prisma");
 const createAuthRouter = require("./routes/authRoutes");
 const createTaskRouter = require("./routes/taskRoutes");
+const createAiRouter = require("./routes/aiRoutes");
+const geminiService = require("./services/geminiService");
+const createBrainDumpRouter = require("./routes/brainDumpRoutes");
+const brainDumpService = require("./services/brainDumpService");
 
-function createApp({ prismaClient = prisma } = {}) {
+function createApp({
+    prismaClient = prisma,
+    aiService = geminiService,
+    brainDumpProcessingService = brainDumpService
+} = {}) {
     const app = express();
 
     app.use(cors());
@@ -18,6 +26,8 @@ function createApp({ prismaClient = prisma } = {}) {
 
     app.use("/api/auth", createAuthRouter(prismaClient));
     app.use("/api/tasks", createTaskRouter(prismaClient));
+    app.use("/api/ai", createAiRouter(aiService));
+    app.use("/api/brain-dumps", createBrainDumpRouter(brainDumpProcessingService));
 
     app.use((error, req, res, next) => {
         if (error.type === "entity.parse.failed") {
