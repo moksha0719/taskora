@@ -59,6 +59,7 @@ function createMockService(overrides = {}) {
         getActiveStudyPlan: async () => null,
         getStudyPlanById: async () => ({ id: PLAN_ID }),
         updateStudyPlan: async () => ({ id: PLAN_ID }),
+        replaceStudySchedule: async () => ({ id: PLAN_ID }),
         deleteStudyPlan: async () => ({ id: PLAN_ID }),
         ...overrides
     };
@@ -213,6 +214,35 @@ test("PUT validates the complete payload and returns an updated plan", async () 
     });
 });
 
+test("PUT schedule persists the authenticated caller's validated plan schedule", async () => {
+    let received;
+    const savedPlan = { id: PLAN_ID, subjects: [{ scheduleItems: [] }] };
+    const service = createMockService({
+        replaceStudySchedule: async (...args) => {
+            received = args;
+            return savedPlan;
+        }
+    });
+    const schedule = [{
+        subjectId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        subjectName: "Mathematics",
+        dayOfWeek: "MON",
+        startMinuteOfDay: 540,
+        durationMinutes: 150,
+        kind: "STUDY"
+    }];
+
+    await withServer(service, async (request) => {
+        const response = await request(
+            `/api/study-plans/${PLAN_ID}/schedule`,
+            jsonRequest("PUT", { schedule })
+        );
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { studyPlan: savedPlan });
+        assert.deepEqual(received, [USER_A, PLAN_ID, { schedule }]);
+    });
+});
+
 test("DELETE removes an eligible plan and returns 204", async () => {
     let received;
     const service = createMockService({
@@ -241,6 +271,7 @@ test("all endpoints require authentication", async () => {
             request(`/api/study-plans/${PLAN_ID}`),
             request(`/api/study-plans/${PLAN_ID}`, { method: "PUT", body: JSON.stringify(VALID_INPUT) }),
             request(`/api/study-plans/${PLAN_ID}`, { method: "DELETE" }),
+            request(`/api/study-plans/${PLAN_ID}/schedule`, { method: "PUT", body: "{}" }),
             request("/api/study-plans/generate", {
                 method: "POST",
                 headers: { "content-type": "application/json" },
@@ -257,7 +288,7 @@ test("all endpoints require authentication", async () => {
         const responses = await Promise.all(requests);
         assert.deepEqual(
             responses.map((response) => response.status),
-            [401, 401, 401, 401, 401, 401, 401, 401, 401]
+            [401, 401, 401, 401, 401, 401, 401, 401, 401, 401]
         );
     });
 });
@@ -521,6 +552,7 @@ test("GET by ID, PUT, and DELETE reject invalid UUIDs without calling the servic
     const service = createMockService({
         getStudyPlanById: async () => { calls += 1; },
         updateStudyPlan: async () => { calls += 1; },
+        replaceStudySchedule: async () => { calls += 1; },
         deleteStudyPlan: async () => { calls += 1; }
     });
 
@@ -528,12 +560,13 @@ test("GET by ID, PUT, and DELETE reject invalid UUIDs without calling the servic
         const responses = await Promise.all([
             request("/api/study-plans/not-a-uuid", authRequest()),
             request("/api/study-plans/not-a-uuid", jsonRequest("PUT", VALID_INPUT)),
+            request("/api/study-plans/not-a-uuid/schedule", jsonRequest("PUT", { schedule: [] })),
             request("/api/study-plans/not-a-uuid", {
                 method: "DELETE",
                 headers: authRequest().headers
             })
         ]);
-        assert.deepEqual(responses.map((response) => response.status), [400, 400, 400]);
+        assert.deepEqual(responses.map((response) => response.status), [400, 400, 400, 400]);
         assert.equal(calls, 0);
     });
 });

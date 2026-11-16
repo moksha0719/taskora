@@ -37,7 +37,7 @@ function notFoundError() {
 function createPrismaMock(seed = []) {
     const tasks = new Map(seed.map((task) => [task.id, { ...task }]));
 
-    return {
+    const prisma = {
         tasks,
         task: {
             create: async ({ data, select }) => {
@@ -63,6 +63,18 @@ function createPrismaMock(seed = []) {
                 const task = tasks.get(where.id);
                 return task && task.userId === where.userId ? selected(task, select) : null;
             },
+            updateMany: async ({ where, data }) => {
+                const task = tasks.get(where.id);
+                if (
+                    !task ||
+                    task.userId !== where.userId ||
+                    (where.status && task.status === where.status.not)
+                ) {
+                    return { count: 0 };
+                }
+                Object.assign(task, data, { updatedAt: new Date() });
+                return { count: 1 };
+            },
             update: async ({ where, data, select }) => {
                 const task = tasks.get(where.id);
                 if (!task || task.userId !== where.userId) {
@@ -81,6 +93,8 @@ function createPrismaMock(seed = []) {
             }
         }
     };
+    prisma.$transaction = async (callback) => callback({ task: prisma.task });
+    return prisma;
 }
 
 function tokenFor(userId) {
@@ -93,8 +107,12 @@ function tokenFor(userId) {
     });
 }
 
-async function withServer(prisma, run) {
-    const server = createApp({ prismaClient: prisma }).listen(0);
+async function withServer(
+    prisma,
+    run,
+    notificationService = { createNotification: async () => ({}) }
+) {
+    const server = createApp({ prismaClient: prisma, notificationService }).listen(0);
     await once(server, "listening");
     const address = server.address();
     const request = (path, options = {}) => fetch(`http://127.0.0.1:${address.port}${path}`, options);
@@ -152,6 +170,16 @@ test("authenticated user can create a task with validated fields", async () => {
         assert.equal(body.task.status, "IN_PROGRESS");
         assert.equal(body.task.priority, "HIGH");
         assert.equal(body.task.dueDate, "2026-12-01T12:30:00.000Z");
+        assert.deepEqual(Object.keys(body.task).sort(), [
+            "createdAt",
+            "description",
+            "dueDate",
+            "id",
+            "priority",
+            "status",
+            "title",
+            "updatedAt"
+        ]);
         assert.equal(stored.userId, USER_A);
         assert.equal("userId" in body.task, false);
     });
@@ -201,6 +229,62 @@ test("user can update an owned task but cannot update another user's task", asyn
         assert.equal(otherUpdate.status, 404);
         assert.equal(prisma.tasks.get(TASK_B).title, "Do not change");
     });
+
+});
+
+test("task completion creates one owner-scoped notification transactionally", async () => {
+    const prisma = createPrismaMock([seedTask(TASK_A, USER_A)]);
+    const notificationCalls = [];
+    const notificationService = {
+        createNotification: async (...args) => {
+            notificationCalls.push(args);
+            return {};
+        }
+    };
+
+    await withServer(prisma, async (request) => {
+        const firstResponse = await request(`/api/tasks/${TASK_A}`, jsonRequest("PUT", {
+            status: "COMPLETED"
+        }));
+        assert.equal(firstResponse.status, 200);
+
+        const repeatedResponse = await request(`/api/tasks/${TASK_A}`, jsonRequest("PUT", {
+            title: "Completed task",
+            status: "COMPLETED"
+        }));
+        assert.equal(repeatedResponse.status, 200);
+    }, notificationService);
+
+    assert.equal(notificationCalls.length, 1);
+    assert.equal(notificationCalls[0][0].userId, USER_A);
+    assert.equal(notificationCalls[0][0].type, "task_completed");
+    assert.equal(notificationCalls[0][0].taskId, TASK_A);
+    assert.equal(notificationCalls[0][0].actionUrl, `/tasks/${TASK_A}`);
+});
+
+test("concurrent task completion requests create only one notification", async () => {
+    const prisma = createPrismaMock([seedTask(TASK_A, USER_A)]);
+    const notificationCalls = [];
+    const notificationService = {
+        createNotification: async (...args) => {
+            notificationCalls.push(args);
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return {};
+        }
+    };
+
+    await withServer(prisma, async (request) => {
+        const responses = await Promise.all([
+            request(`/api/tasks/${TASK_A}`, jsonRequest("PUT", { status: "COMPLETED" })),
+            request(`/api/tasks/${TASK_A}`, jsonRequest("PUT", { status: "COMPLETED" }))
+        ]);
+        assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+    }, notificationService);
+
+    assert.equal(notificationCalls.length, 1);
+    assert.equal(notificationCalls[0][0].taskId, TASK_A);
+    assert.equal(notificationCalls[0][0].userId, USER_A);
+    assert.equal(prisma.tasks.get(TASK_A).status, "COMPLETED");
 });
 
 test("user can delete an owned task but cannot delete another user's task", async () => {
@@ -236,7 +320,8 @@ test("task creation and updates reject invalid fields and values", async () => {
             { title: "Task", description: 12 },
             { title: "Task", dueDate: "not-a-date" },
             { title: "Task", dueDate: "2026-02-31T12:00:00Z" },
-            { title: "Task", userId: USER_B }
+            { title: "Task", userId: USER_B },
+            { title: "Task", ownerId: USER_B }
         ];
 
         for (const body of invalidBodies) {
@@ -248,6 +333,11 @@ test("task creation and updates reject invalid fields and values", async () => {
         assert.equal(emptyUpdate.status, 400);
         const invalidUpdate = await request(`/api/tasks/${TASK_A}`, jsonRequest("PUT", { status: "DONE" }));
         assert.equal(invalidUpdate.status, 400);
+        const unsupportedUpdate = await request(
+            `/api/tasks/${TASK_A}`,
+            jsonRequest("PUT", { title: "Task", userId: USER_B })
+        );
+        assert.equal(unsupportedUpdate.status, 400);
     });
 });
 

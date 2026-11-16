@@ -125,6 +125,47 @@ test("registration validates required fields and password length", async () => {
     });
 });
 
+test("registration and login reject unsupported authentication fields", async () => {
+    let createCalls = 0;
+    let findCalls = 0;
+    const prisma = createPrismaMock();
+    const originalCreate = prisma.user.create;
+    prisma.user.create = async (...args) => {
+        createCalls += 1;
+        return originalCreate(...args);
+    };
+    const originalFindUnique = prisma.user.findUnique;
+    prisma.user.findUnique = async (...args) => {
+        findCalls += 1;
+        return originalFindUnique(...args);
+    };
+
+    await withServer(prisma, async (request) => {
+        const registration = await request("/api/auth/register", jsonRequest({
+            name: "Alex Doe",
+            email: "alex@example.com",
+            password: "a-secure-password",
+            userId: "another-user"
+        }));
+        const login = await request("/api/auth/login", jsonRequest({
+            email: "alex@example.com",
+            password: "a-secure-password",
+            role: "admin"
+        }));
+
+        assert.equal(registration.status, 400);
+        assert.equal(login.status, 400);
+        assert.deepEqual(await registration.json(), {
+            error: "Unsupported authentication field: userId"
+        });
+        assert.deepEqual(await login.json(), {
+            error: "Unsupported authentication field: role"
+        });
+        assert.equal(createCalls, 0);
+        assert.equal(findCalls, 0);
+    });
+});
+
 test("login returns a JWT that authenticates the safe /me endpoint", async () => {
     const passwordHash = await bcrypt.hash("a-secure-password", 4);
     const prisma = createPrismaMock({
@@ -145,7 +186,22 @@ test("login returns a JWT that authenticates the safe /me endpoint", async () =>
 
         assert.equal(response.status, 200);
         assert.equal(typeof body.token, "string");
-        assert.equal("password" in body.user, false);
+        assert.deepEqual(body.user, {
+            id: "test-user-id",
+            name: "Alex Doe",
+            email: "alex@example.com",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z"
+        });
+        const claims = jwt.verify(body.token, TEST_SECRET, {
+            algorithms: ["HS256"],
+            audience: JWT_AUDIENCE,
+            issuer: JWT_ISSUER
+        });
+        assert.equal(claims.sub, "test-user-id");
+        assert.equal(claims.iss, JWT_ISSUER);
+        assert.equal(claims.aud, JWT_AUDIENCE);
+        assert.equal(claims.exp - claims.iat, 60 * 60);
         const profileResponse = await request("/api/auth/me", {
             headers: { authorization: `Bearer ${body.token}` }
         });
@@ -200,6 +256,11 @@ test("protected /me rejects missing, invalid, and expired JWTs", async () => {
         ]);
 
         assert.deepEqual(responses.map((response) => response.status), [401, 401, 401]);
+        assert.deepEqual(await Promise.all(responses.map((response) => response.json())), [
+            { error: "Authentication required" },
+            { error: "Invalid or expired token" },
+            { error: "Invalid or expired token" }
+        ]);
     });
 });
 
