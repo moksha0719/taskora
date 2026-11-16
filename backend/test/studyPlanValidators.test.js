@@ -115,6 +115,10 @@ test("rejects impossible dates and reversed date ranges", () => {
 test("rejects invalid time zones and workload ranges", () => {
     assert.match(validateStudyPlanCreateInput(validInput({ timeZone: "Mars/Olympus" })).error, /IANA/);
     assert.match(validateStudyPlanCreateInput(validInput({ timeZone: "" })).error, /IANA/);
+    assert.match(
+        validateStudyPlanCreateInput(validInput({ timeZone: "A".repeat(65) })).error,
+        /IANA/
+    );
     assert.match(validateStudyPlanCreateInput(validInput({ weeklyTargetMinutes: 599 })).error, /600 and 2400/);
     assert.match(validateStudyPlanCreateInput(validInput({ weeklyTargetMinutes: 2401 })).error, /600 and 2400/);
 });
