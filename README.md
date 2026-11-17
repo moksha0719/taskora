@@ -14,15 +14,15 @@ The existing frontend describes these screens and interactions:
 |---|---|---|
 | **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Form validation, password-strength display, and demo Student/Admin switcher. This is not server authentication. |
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
-| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. A backend text-response endpoint exists, but proposal generation/approval is not integrated. |
+| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. The backend supports persistent conversations and task proposals with explicit approval/rejection; the frontend flow is not integrated. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner` | Subject workload and weekly timetable UI. Backend plan CRUD and deterministic schedule preview/persistence endpoints exist, but the UI is not integrated. |
+| **FR-05 Smart Study Planner** | `/study-planner` | Subject workload and weekly timetable UI. The backend supports plan CRUD, deterministic schedule preview/persistence, activation/deactivation, and completion history; the UI is not integrated. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
 | **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
 | **FR-09 Gamification** | `/achievements` | Scholar levels, XP progress, badges, and transaction-style history UI. |
 | **FR-10 Study Workspace** | `/workspace` | Subject-organized notes and editor UI with private-by-default and sharing controls. |
-| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. The backend can process text into proposed tasks, but does not persist entries or tasks. |
+| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. The backend persists Brain Dumps and proposed tasks; tasks are created only after explicit approval. The frontend is not integrated. |
 | **FR-12 Virtual Study Rooms** | `/study-rooms` | Public/private room UI, passcode flow, synchronized timer, participants, and quiet chat. |
 | **FR-13 Notifications** | `/notifications` | Notification center UI for deadline, habit, room, and achievement alerts. |
 | **FR-14 Search and Filter** | `/search` | Search UI for tasks, notes, and habits with filter tabs. |
@@ -56,7 +56,7 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Database | PostgreSQL | Prisma-backed schema and migrations present |
 | ORM | Prisma | Configured in `backend/` |
 | Authentication | bcrypt password hashing and JWT | Backend endpoints present; frontend sign-in remains a demo |
-| AI integration | Google Gemini through the backend | Assistant and Brain Dump endpoints present; frontend proposal flow remains local |
+| AI integration | Google Gemini through the backend | Assistant, persistent conversation/proposal, and Brain Dump endpoints present; frontend proposal flow remains local |
 
 ## Architecture
 

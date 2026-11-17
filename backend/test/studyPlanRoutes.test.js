@@ -341,7 +341,8 @@ test("GET completions returns owner-scoped records with date-only occurrence dat
                 findMany: async (args) => {
                     completionQuery = args;
                     return returnNoCompletions ? [] : [completion];
-                }
+                },
+                count: async () => returnNoCompletions ? 0 : 1
             }
         }
     });
@@ -357,7 +358,8 @@ test("GET completions returns owner-scoped records with date-only occurrence dat
                 occurrenceDate: "2026-11-16",
                 completedAt: "2026-11-16T12:00:00.000Z",
                 actualDurationMinutes: 45
-            }]
+                }],
+                pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
         });
         assert.deepEqual(completionQuery.where.occurrenceDate, {
             gte: new Date("2026-11-16T00:00:00.000Z"),
@@ -372,7 +374,10 @@ test("GET completions returns owner-scoped records with date-only occurrence dat
         returnNoCompletions = true;
         const empty = await request(path, authRequest());
         assert.equal(empty.status, 200);
-        assert.deepEqual(await empty.json(), { completions: [] });
+        assert.deepEqual(await empty.json(), {
+            completions: [],
+            pagination: { page: 1, limit: 100, total: 0, totalPages: 0 }
+        });
 
         const invalidDate = await request(
             `/api/study-plans/${PLAN_ID}/completions?from=2026-02-30&to=2026-03-01`,
@@ -385,6 +390,13 @@ test("GET completions returns owner-scoped records with date-only occurrence dat
             authRequest()
         );
         assert.equal(reversedRange.status, 400);
+        assert.equal(planLookups.length, 3);
+
+        const excessivePage = await request(
+            `${path}&page=1301`,
+            authRequest()
+        );
+        assert.equal(excessivePage.status, 400);
         assert.equal(planLookups.length, 3);
     }, undefined, undefined, completionService);
 });

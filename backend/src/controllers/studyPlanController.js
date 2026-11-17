@@ -2,6 +2,7 @@ const { StudyPlanServiceError } = require("../services/studyPlanService");
 const { StudyScheduleError } = require("../services/studyScheduleService");
 const { ScheduleCompletionServiceError } = require("../services/scheduleCompletionService");
 const { validateStudyPlanCreateInput } = require("../validators/studyPlanValidators");
+const logSafeError = require("../lib/logSafeError");
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -26,6 +27,7 @@ function sendServiceError(error, res) {
         }
     }
 
+    logSafeError("Study plan request failed:", error);
     return res.status(500).json({ error: "Internal server error" });
 }
 
@@ -102,6 +104,7 @@ function sendScheduleError(error, res) {
         }
     }
 
+    logSafeError("Study schedule request failed:", error);
     return res.status(500).json({ error: "Internal server error" });
 }
 
@@ -181,6 +184,7 @@ function sendCompletionError(error, res) {
             return res.status(409).json({ error: error.message });
         }
     }
+    logSafeError("Schedule completion request failed:", error);
     return res.status(500).json({ error: "Internal server error" });
 }
 
@@ -214,6 +218,38 @@ function createStudyPlanController(
     async function getActive(req, res) {
         try {
             const studyPlan = await studyPlanService.getActiveStudyPlan(req.user.id);
+            return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
+        } catch (error) {
+            return sendServiceError(error, res);
+        }
+    }
+
+    async function activate(req, res) {
+        if (!validatePlanId(req, res)) {
+            return;
+        }
+
+        try {
+            const studyPlan = await studyPlanService.activateStudyPlan(
+                req.user.id,
+                req.params.id
+            );
+            return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
+        } catch (error) {
+            return sendServiceError(error, res);
+        }
+    }
+
+    async function deactivate(req, res) {
+        if (!validatePlanId(req, res)) {
+            return;
+        }
+
+        try {
+            const studyPlan = await studyPlanService.deactivateStudyPlan(
+                req.user.id,
+                req.params.id
+            );
             return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
@@ -352,21 +388,26 @@ function createStudyPlanController(
             return res.status(400).json({ error: "Invalid study plan ID" });
         }
 
+        const supportedQueryFields = new Set(["from", "to", "page", "limit"]);
         const unsupportedQuery = Object.keys(req.query).find(
-            (field) => field !== "from" && field !== "to"
+            (field) => !supportedQueryFields.has(field)
         );
         if (unsupportedQuery) {
             return res.status(400).json({ error: `Unsupported query parameter: ${unsupportedQuery}` });
         }
 
         try {
-            const completions = await scheduleCompletionService.listScheduleCompletions(
+            const result = await scheduleCompletionService.listScheduleCompletions(
                 req.user.id,
                 req.params.planId,
                 req.query.from,
-                req.query.to
+                req.query.to,
+                { page: req.query.page, limit: req.query.limit }
             );
-            return res.json({ completions: completions.map(serializeCompletion) });
+            return res.json({
+                completions: result.completions.map(serializeCompletion),
+                pagination: result.pagination
+            });
         } catch (error) {
             return sendCompletionError(error, res);
         }
@@ -376,6 +417,8 @@ function createStudyPlanController(
         create,
         list,
         getActive,
+        activate,
+        deactivate,
         getById,
         update,
         saveSchedule,

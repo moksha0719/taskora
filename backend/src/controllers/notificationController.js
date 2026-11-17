@@ -3,6 +3,7 @@ const {
     isValidNotificationId,
     validateNotificationListQuery
 } = require("../validators/notificationValidators");
+const logSafeError = require("../lib/logSafeError");
 
 function sendNotificationError(error, res) {
     if (error instanceof NotificationServiceError) {
@@ -14,6 +15,7 @@ function sendNotificationError(error, res) {
         }
     }
 
+    logSafeError("Notification request failed:", error);
     return res.status(500).json({ error: "Internal server error" });
 }
 

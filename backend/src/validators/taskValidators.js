@@ -3,6 +3,8 @@ const TASK_PRIORITIES = new Set(["LOW", "MEDIUM", "HIGH"]);
 const TASK_FIELDS = new Set(["title", "description", "status", "priority", "dueDate"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2}))?$/;
+const MAX_TASK_TITLE_LENGTH = 120;
+const MAX_TASK_DESCRIPTION_LENGTH = 1000;
 
 function validateTaskInput(body, partial = false) {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -26,6 +28,14 @@ function validateTaskInput(body, partial = false) {
         return { error: "Title must be a non-empty string" };
     }
 
+    if (
+        (!partial || Object.hasOwn(body, "title")) &&
+        typeof body.title === "string" &&
+        body.title.trim().length > MAX_TASK_TITLE_LENGTH
+    ) {
+        return { error: `Title must be ${MAX_TASK_TITLE_LENGTH} characters or fewer` };
+    }
+
     const data = {};
     for (const field of keys) {
         const value = body[field];
@@ -35,6 +45,12 @@ function validateTaskInput(body, partial = false) {
         } else if (field === "description") {
             if (value !== null && typeof value !== "string") {
                 return { error: "Description must be a string or null" };
+            }
+            if (typeof value === "string" && !value.trim()) {
+                return { error: "Description must not be empty or whitespace only" };
+            }
+            if (typeof value === "string" && value.trim().length > MAX_TASK_DESCRIPTION_LENGTH) {
+                return { error: `Description must be ${MAX_TASK_DESCRIPTION_LENGTH} characters or fewer` };
             }
             data.description = value;
         } else if (field === "status") {

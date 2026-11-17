@@ -1,10 +1,11 @@
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum TaskStatus {
@@ -48,6 +49,22 @@ enum NotificationType {
   SYSTEM             @map("system")
 }
 
+enum AssistantMessageRole {
+  USER
+  ASSISTANT
+}
+
+enum AssistantActionType {
+  CREATE_TASK
+}
+
+enum ActionProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -58,6 +75,8 @@ model User {
   tasks     Task[]
   studyPlans     StudyPlan[]
   notifications Notification[]
+  aiConversations AiConversation[]
+  brainDumps BrainDump[]
 }
 
 model Task {
@@ -72,6 +91,8 @@ model Task {
   userId      String       @db.Uuid
   user        User         @relation(fields: [userId], references: [id])
   notifications Notification[]
+  assistantProposals AssistantProposal[]
+  brainDumpProposals BrainDumpTaskProposal[]
 
   @@index([userId])
   @@index([status])
@@ -160,4 +181,80 @@ model Notification {
   @@index([userId, createdAt, id])
   @@index([userId, readAt, createdAt])
   @@index([userId, type, createdAt])
+}
+
+model AiConversation {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @db.Uuid
+  title     String?     @db.VarChar(160)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  messages  AiMessage[]
+  proposals AssistantProposal[]
+
+  @@unique([id, userId])
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String                @id @default(uuid()) @db.Uuid
+  conversationId String                @db.Uuid
+  userId         String                @db.Uuid
+  role           AssistantMessageRole
+  content        String                @db.VarChar(4000)
+  createdAt      DateTime              @default(now())
+  conversation   AiConversation        @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([userId, conversationId, createdAt])
+}
+
+model AssistantProposal {
+  id             String               @id @default(uuid()) @db.Uuid
+  conversationId String               @db.Uuid
+  userId         String               @db.Uuid
+  actionType     AssistantActionType
+  payload        Json
+  status         ActionProposalStatus @default(PENDING)
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  approvedTaskId String?              @unique @db.Uuid
+  createdAt      DateTime             @default(now())
+  conversation   AiConversation      @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade, onUpdate: Cascade)
+  approvedTask   Task?                @relation(fields: [approvedTaskId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([userId, status, createdAt])
+}
+
+model BrainDump {
+  id        String                 @id @default(uuid()) @db.Uuid
+  userId    String                 @db.Uuid
+  inputText String                 @db.VarChar(8000)
+  summary   String                 @db.VarChar(500)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  proposals BrainDumpTaskProposal[]
+
+  @@unique([id, userId])
+  @@index([userId, createdAt])
+}
+
+model BrainDumpTaskProposal {
+  id             String               @id @default(uuid()) @db.Uuid
+  brainDumpId    String               @db.Uuid
+  userId         String               @db.Uuid
+  title          String               @db.VarChar(120)
+  description    String?              @db.VarChar(1000)
+  priority       TaskPriority
+  dueDate        DateTime?
+  status         ActionProposalStatus @default(PENDING)
+  resolvedAt     DateTime?
+  approvedTaskId String?              @unique @db.Uuid
+  createdAt      DateTime             @default(now())
+  brainDump      BrainDump            @relation(fields: [brainDumpId, userId], references: [id, userId], onDelete: Cascade, onUpdate: Cascade)
+  approvedTask   Task?                @relation(fields: [approvedTaskId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([userId, status, createdAt])
 }
