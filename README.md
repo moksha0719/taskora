@@ -14,7 +14,7 @@ The existing frontend describes these screens and interactions:
 |---|---|---|
 | **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Registration and login use the backend JWT API. Password reset is still UI-only. |
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
-| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. Server-side AI and persistent approval are planned. |
+| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. An authenticated backend text-response endpoint exists, but proposal generation and approval are not integrated. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
 | **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, and completion actions for saved schedule items. The API does not currently save previews, activate plans, or return existing completion records; completion status is temporarily cached in the browser. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
@@ -22,7 +22,7 @@ The existing frontend describes these screens and interactions:
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
 | **FR-09 Gamification** | `/achievements` | Scholar levels, XP progress, badges, and transaction-style history UI. |
 | **FR-10 Study Workspace** | `/workspace` | Subject-organized notes and editor UI with private-by-default and sharing controls. |
-| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. |
+| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. The backend can process text into proposed tasks, but does not persist entries or tasks. |
 | **FR-12 Virtual Study Rooms** | `/study-rooms` | Public/private room UI, passcode flow, synchronized timer, participants, and quiet chat. |
 | **FR-13 Notifications** | `/notifications` | Notification center UI for deadline, habit, room, and achievement alerts. |
 | **FR-14 Search and Filter** | `/search` | Search UI for tasks, notes, and habits with filter tabs. |
@@ -82,9 +82,12 @@ taskora/
 ├── backend/
 │   ├── src/
 │   │   └── server.js             # Express API server
+│   ├── prisma/                   # Prisma schema and migrations
+│   ├── Dockerfile
+│   ├── docker-compose.yml        # Local API and PostgreSQL stack
 │   ├── package.json
 │   ├── package-lock.json
-│   └── .env                      # Local only; do not commit
+│   └── .env.example              # Server-side environment template
 ├── public/
 │   └── favicon.svg
 ├── src/
@@ -112,13 +115,14 @@ taskora/
 └── BACKEND_PLAN.md
 ```
 
-`node_modules`, generated build output, and local secret files are omitted from this tree. The backend `.env` shown above is machine-local and must not be added to version control.
+`node_modules`, generated build output, and local secret files are omitted from this tree. Do not add local `.env` files or credentials to version control.
 
 ## Prerequisites
 
-- Node.js 18+ (or a compatible current LTS release)
+- Node.js 22 LTS and npm for backend development (the backend Docker image uses Node 22).
 - npm
-- Docker Compose is used for the local backend and PostgreSQL services. Study Planner and authentication API calls require the backend and database to be running.
+- Docker Desktop with the Compose plugin for the containerized backend and PostgreSQL, or a local PostgreSQL installation.
+- The frontend prototype can run independently; backend-backed authentication and Study Planner features require the API and database.
 
 ## Installation and setup
 
@@ -149,17 +153,19 @@ Authentication and Study Planner requests use this API base URL. Other prototype
 
 ### Backend
 
-The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. Create `backend/.env` from the backend example before starting the API. `PORT` defaults to `5000`; database, JWT, and AI settings are server-only:
+The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. Create `backend/.env` from the backend example before starting the API. The Compose setup requires the PostgreSQL, `JWT_SECRET`, and `DATABASE_URL` values shown in that example. Gemini-powered features also need `GEMINI_API_KEY`; `GEMINI_MODEL` is optional. These settings are server-only:
 
 ```dotenv
-PORT=5000
-DATABASE_URL=postgresql://<USER>:<PASSWORD>@localhost:5432/taskora?schema=public
-JWT_SECRET=<generate-a-long-random-secret>
-AI_API_KEY=<your-provider-key>
-AI_MODEL_NAME=<provider-model-name>
+POSTGRES_DB=taskora_db
+POSTGRES_USER=<local-user>
+POSTGRES_PASSWORD=<unique-local-password>
+DATABASE_URL=postgresql://<local-user>:<password>@postgres:5432/taskora_db?schema=public
+JWT_SECRET=<random-secret-of-at-least-32-bytes>
+GEMINI_API_KEY=<your-provider-key>
+GEMINI_MODEL=<supported-model-name>
 ```
 
-These are variable names and placeholders, not working credentials. Do not commit `.env` files. Keep `DATABASE_URL`, `JWT_SECRET`, and AI provider keys out of frontend variables and client-side code.
+These are variable names and placeholders, not working credentials; use the checked-in [`backend/.env.example`](./backend/.env.example) as the template. Do not commit `.env` files. Keep `DATABASE_URL`, `JWT_SECRET`, and AI provider keys out of frontend variables and client-side code.
 
 ## Running the application
 
@@ -189,23 +195,23 @@ cd backend
 npm run dev
 ```
 
-This runs the API server with nodemon, normally at `http://localhost:5000`. The database must be available and migrations applied. To run without nodemon:
+This runs the API server with nodemon, normally at `http://localhost:5000`. The database must be available and migrations applied. For containerized development, use Docker Compose from `backend/`; PostgreSQL is exposed on host port `5433`. To run the API directly with `npm run dev`, configure `DATABASE_URL` for the database address reachable from the host (for the Compose database, use `localhost:5433`) and set `JWT_SECRET`. To run without nodemon:
 
 ```bash
 npm start
 ```
 
-At this stage the server only returns a status message from `GET /`; it does not yet expose application data APIs.
+The backend exposes a health response at `GET /` and authenticated application APIs described below.
 
 ## PostgreSQL and Prisma setup
 
 PostgreSQL and Prisma are configured in the backend. The schema and migrations are under `backend/prisma`, and `backend/docker-compose.yml` defines the local PostgreSQL and API services.
 
-For local preparation:
+For containerized local development:
 
 1. Copy `backend/.env.example` to `backend/.env` and set unique local PostgreSQL and JWT values.
-2. Start the services with the backend Docker Compose configuration.
-3. Apply the checked-in migrations before using the API.
+2. From `backend/`, start the services with `docker compose up --build`.
+3. Apply the checked-in migrations from `backend/` with `docker compose exec backend npx prisma migrate deploy` before using database-backed APIs.
 
 Use a separate database for tests and production. Never put real database credentials in source files or commit them.
 
@@ -232,9 +238,9 @@ Additional API areas, including notifications, remain on the roadmap. Request an
 
 ## Testing and acceptance scenarios
 
-The root package defines `npm run build`; the backend package defines `npm test`. `src/lib/api/srsAcceptance.test.ts` is a manual prototype acceptance routine, not an automated frontend test suite. Do not treat its scenarios as proof of end-to-end coverage.
+The root package defines `npm run build` and `npm run test:run`; the backend package defines `npm test`. These tests do not imply end-to-end coverage for every product scenario.
 
-The original README listed the following SRS acceptance scenarios. They are retained as product checks, **not as a claim that they have all been run or that the backend supports them**. Add frontend, API, and database tests as those layers are implemented.
+The original README listed the following SRS acceptance scenarios. They are retained as product checks, **not as a claim that they have all been run or that every feature is backed by the backend**. Add focused frontend, API, and database tests as integration work continues.
 
 - **TC01 Registration and login:** register with valid credentials, evaluate password strength, and authenticate against the backend.
 - **TC02 Task CRUD:** create, complete, edit, filter, and delete tasks; completion may trigger confetti.
@@ -251,21 +257,9 @@ The original README listed the following SRS acceptance scenarios. They are reta
 - **TC13 Theme preferences:** persist custom colors, card borders, and dark mode.
 - **TC14 Dashboard customization:** persist widget visibility and ordering.
 
-## Development roadmap
+## Next steps
 
-The implementation order is summarized below. Each phase has tasks, file suggestions, outcomes, testing requirements, and a checklist in [BACKEND_PLAN.md](./BACKEND_PLAN.md).
-
-1. Backend structure and API planning
-2. PostgreSQL and Prisma setup
-3. Database schema and migrations
-4. Registration/login, password hashing, and JWT
-5. Task management CRUD APIs
-6. Brain Dump and backend AI integration
-7. Smart Study Planner
-8. Notifications
-9. Validation, error handling, and testing
-10. Frontend API integration
-11. Security improvements and deployment
+The backend provides authentication, task, AI Assistant, Brain Dump, and Study Planner APIs. Authentication and Study Planner are integrated with the frontend; other prototype features still use mock data. Remaining work includes integrating those features with their APIs, implementing additional API areas such as notifications, and validating deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
 
 ## Team contribution overview
 
