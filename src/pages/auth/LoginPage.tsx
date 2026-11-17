@@ -1,38 +1,32 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { MascotBunny } from '../../components/common/MascotBunny';
 import { useAuth } from '../../context/AuthContext';
-import { Eye, EyeOff, ShieldCheck, UserCheck, ArrowRight, Lock, Mail } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, Lock, Mail } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { login } = useAuth();
+  const { login, authError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [email, setEmail] = useState('emily.watson@university.edu');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const notice = (location.state as { message?: string } | null)?.message;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setFormError(null);
     try {
-      await login(email, 'student');
+      await login(email, password);
       navigate('/dashboard');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleQuickDemoLogin = async (role: 'student' | 'admin') => {
-    setLoading(true);
-    try {
-      const demoEmail = role === 'admin' ? 'admin@taskora.edu' : 'emily.watson@university.edu';
-      await login(demoEmail, role);
-      navigate(role === 'admin' ? '/admin' : '/dashboard');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Unable to sign in.');
     } finally {
       setLoading(false);
     }
@@ -67,41 +61,27 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Side: Form & Quick Demo Logins */}
+        {/* Right Side: Sign-in Form */}
         <div className="p-8 sm:p-12 flex flex-col justify-center">
           <div className="mb-6">
             <h3 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
               Sign In
             </h3>
             <p className="text-xs text-muted-purple mt-1">
-              Enter your credentials or choose a quick demo account.
+              Sign in with your Taskora account.
             </p>
           </div>
 
-          {/* Quick Demo Switcher */}
-          <div className="mb-6 p-3 rounded-2xl bg-primary-subtle/40 dark:bg-primary/10 border border-primary/20 space-y-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-primary block">
-              Quick Test Accounts (SRS Evaluator)
-            </span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickDemoLogin('student')}
-                className="px-3 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-[#1E163B] text-deep-purple dark:text-white border border-subtle hover:border-primary flex items-center justify-center gap-1.5 shadow-2xs transition-all active:scale-95"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-primary" />
-                <span>Student Demo</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickDemoLogin('admin')}
-                className="px-3 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-[#1E163B] text-deep-purple dark:text-white border border-subtle hover:border-primary flex items-center justify-center gap-1.5 shadow-2xs transition-all active:scale-95"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
-                <span>Admin Demo</span>
-              </button>
-            </div>
-          </div>
+          {notice && (
+            <p role="status" className="mb-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+              {notice}
+            </p>
+          )}
+          {(formError || authError) && (
+            <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              {formError || authError}
+            </p>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -151,19 +131,6 @@ export const LoginPage: React.FC = () => {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-            </div>
-
-            <div className="flex items-center">
-              <input
-                id="rememberMe"
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 rounded text-primary focus:ring-primary/40 border-subtle cursor-pointer"
-              />
-              <label htmlFor="rememberMe" className="ml-2 text-xs text-muted-purple cursor-pointer">
-                Remember this device for 30 days
-              </label>
             </div>
 
             <Button

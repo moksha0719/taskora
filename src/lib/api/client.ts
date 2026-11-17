@@ -1,13 +1,15 @@
 import {
-  User, Task, Habit, StudyPlan, StudyNote, BrainDumpEntry,
+  User, Task, Habit, StudyNote, BrainDumpEntry,
   StudyRoom, Achievement, XPTransaction, NotificationItem,
   ThemeConfig, DashboardWidgetConfig, AdminStats, ModerationReport,
-  AuditLogEntry, AIProposal, ChatMessage, FocusSession
+  AuditLogEntry, AIProposal, ChatMessage, FocusSession, ApiStudyPlan,
+  StudyPlanInput, StudySchedulePreviewInput, StudySchedulePreviewItem,
+  StudyCompletion
 } from '../../types';
 
 import {
-  INITIAL_USER, ADMIN_USER, INITIAL_TASKS, INITIAL_HABITS,
-  INITIAL_STUDY_PLAN, INITIAL_NOTES, INITIAL_BRAIN_DUMP,
+  INITIAL_TASKS, INITIAL_HABITS,
+  INITIAL_NOTES, INITIAL_BRAIN_DUMP,
   INITIAL_ROOMS, INITIAL_ACHIEVEMENTS, INITIAL_XP_TRANSACTIONS,
   INITIAL_NOTIFICATIONS, INITIAL_AI_PROPOSALS, INITIAL_THEME_CONFIG,
   INITIAL_DASHBOARD_WIDGETS, INITIAL_ADMIN_STATS,
@@ -35,44 +37,135 @@ function saveToStorage<T>(key: string, value: T): void {
 // Simulated network delay for realistic API behavior
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
+const AUTH_TOKEN_KEY = 'taskora_auth_token';
+export const STUDY_PLANS_UPDATED_EVENT = 'taskora:study-plans-updated';
+
+function notifyStudyPlansUpdated(): void {
+  window.dispatchEvent(new Event(STUDY_PLANS_UPDATED_EVENT));
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+function getAuthToken(): string | null {
+  return sessionStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setAuthToken(token: string): void {
+  sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+function clearAuthToken(): void {
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+async function requestApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const token = getAuthToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const body = await response.json() as { error?: string } & Record<string, unknown>;
+  if (!response.ok) {
+    throw new ApiError(
+      typeof body.error === 'string' ? body.error : `Request failed with status ${response.status}`,
+      response.status
+    );
+  }
+  return body as T;
+}
+
+interface ApiUser {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
+function toAppUser(user: ApiUser): User {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: 'student',
+    avatar: '',
+    joinedAt: user.createdAt,
+  };
+}
+
+function withCachedProfile(user: ApiUser): User {
+  const appUser = toAppUser(user);
+  const cachedUser = loadFromStorage<User | null>('current_user', null);
+  return cachedUser?.id === appUser.id
+    ? { ...appUser, ...cachedUser, id: appUser.id, role: 'student' }
+    : appUser;
+}
+
 // ==========================================
 // AUTH API
 // ==========================================
 export const authApi = {
   async getCurrentUser(): Promise<User | null> {
-    await delay(50);
-    return loadFromStorage<User>('current_user', INITIAL_USER);
+    if (!getAuthToken()) {
+      return null;
+    }
+
+    try {
+      const { user } = await requestApi<{ user: ApiUser }>('/api/auth/me');
+      const currentUser = withCachedProfile(user);
+      saveToStorage('current_user', currentUser);
+      return currentUser;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        clearAuthToken();
+        return null;
+      }
+      throw error;
+    }
   },
 
-  async login(email: string, role: 'student' | 'admin' = 'student'): Promise<User> {
-    await delay(200);
-    const user = role === 'admin' ? ADMIN_USER : { ...INITIAL_USER, email };
-    saveToStorage('current_user', user);
-    return user;
+  async login(email: string, password: string): Promise<User> {
+    const { token, user } = await requestApi<{ token: string; user: ApiUser }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    setAuthToken(token);
+    const currentUser = withCachedProfile(user);
+    saveToStorage('current_user', currentUser);
+    return currentUser;
   },
 
-  async register(name: string, email: string): Promise<User> {
-    await delay(250);
-    const newUser: User = {
-      ...INITIAL_USER,
-      id: `usr_${Date.now()}`,
-      name,
-      email,
-      joinedAt: new Date().toISOString().split('T')[0],
-    };
-    saveToStorage('current_user', newUser);
-    return newUser;
+  async register(name: string, email: string, password: string): Promise<string> {
+    const { message } = await requestApi<{ message: string }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    });
+    return message;
   },
 
   async logout(): Promise<void> {
-    await delay(50);
+    clearAuthToken();
     saveToStorage('current_user', null);
   },
 
-  async updateProfile(updates: Partial<User>): Promise<User> {
+  async updateProfile(user: User, updates: Partial<User>): Promise<User> {
     await delay(150);
-    const current = loadFromStorage<User>('current_user', INITIAL_USER);
-    const updated = { ...current, ...updates };
+    const updated = { ...user, ...updates };
     saveToStorage('current_user', updated);
     return updated;
   },
@@ -201,22 +294,88 @@ export const habitsApi = {
 // STUDY PLANNER API (FR-05, TC07)
 // ==========================================
 export const studyPlansApi = {
-  async getPlan(): Promise<StudyPlan> {
-    await delay(100);
-    return loadFromStorage<StudyPlan>('study_plan', INITIAL_STUDY_PLAN);
+  async getPlans(): Promise<ApiStudyPlan[]> {
+    const { studyPlans } = await requestApi<{ studyPlans: ApiStudyPlan[] }>('/api/study-plans');
+    return studyPlans;
   },
 
-  async updatePlan(plan: StudyPlan): Promise<StudyPlan> {
-    await delay(150);
-    saveToStorage('study_plan', plan);
-    return plan;
+  async getActivePlan(): Promise<ApiStudyPlan | null> {
+    const { studyPlan } = await requestApi<{ studyPlan: ApiStudyPlan | null }>('/api/study-plans/active');
+    return studyPlan;
   },
 
-  async generateSmartSchedule(subjects: string[], hoursPerWeek: number): Promise<StudyPlan> {
-    await delay(350);
-    const current = loadFromStorage<StudyPlan>('study_plan', INITIAL_STUDY_PLAN);
-    // Algorithm balances workload across 5 weekdays
-    return current;
+  async getPlan(id: string): Promise<ApiStudyPlan> {
+    const { studyPlan } = await requestApi<{ studyPlan: ApiStudyPlan }>(
+      `/api/study-plans/${encodeURIComponent(id)}`
+    );
+    return studyPlan;
+  },
+
+  async getCompletions(planId: string, from: string, to: string): Promise<StudyCompletion[]> {
+    const query = new URLSearchParams({ from, to });
+    const { completions } = await requestApi<{ completions: StudyCompletion[] }>(
+      `/api/study-plans/${encodeURIComponent(planId)}/completions?${query}`
+    );
+    return completions;
+  },
+
+  async getCalendarPlans(): Promise<ApiStudyPlan[]> {
+    const plans = await this.getPlans();
+    return Promise.all(plans.map(({ id }) => this.getPlan(id)));
+  },
+
+  async createPlan(input: StudyPlanInput): Promise<ApiStudyPlan> {
+    const { studyPlan } = await requestApi<{ studyPlan: ApiStudyPlan }>('/api/study-plans', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    notifyStudyPlansUpdated();
+    return studyPlan;
+  },
+
+  async updatePlan(id: string, input: StudyPlanInput): Promise<ApiStudyPlan> {
+    const { studyPlan } = await requestApi<{ studyPlan: ApiStudyPlan }>(
+      `/api/study-plans/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify(input) }
+    );
+    notifyStudyPlansUpdated();
+    return studyPlan;
+  },
+
+  async deletePlan(id: string): Promise<void> {
+    await requestApi<void>(`/api/study-plans/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    notifyStudyPlansUpdated();
+  },
+
+  async generateSchedule(input: StudySchedulePreviewInput): Promise<StudySchedulePreviewItem[]> {
+    const { schedule } = await requestApi<{ schedule: StudySchedulePreviewItem[] }>(
+      '/api/study-plans/generate',
+      { method: 'POST', body: JSON.stringify(input) }
+    );
+    return schedule;
+  },
+
+  async upsertCompletion(
+    planId: string,
+    itemId: string,
+    date: string,
+    actualDurationMinutes?: number | null
+  ): Promise<StudyCompletion> {
+    const { completion } = await requestApi<{ completion: StudyCompletion }>(
+      `/api/study-plans/${encodeURIComponent(planId)}/schedule-items/${encodeURIComponent(itemId)}/completions/${encodeURIComponent(date)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ actualDurationMinutes }),
+      }
+    );
+    return completion;
+  },
+
+  async deleteCompletion(planId: string, itemId: string, date: string): Promise<void> {
+    await requestApi(
+      `/api/study-plans/${encodeURIComponent(planId)}/schedule-items/${encodeURIComponent(itemId)}/completions/${encodeURIComponent(date)}`,
+      { method: 'DELETE' }
+    );
   },
 };
 

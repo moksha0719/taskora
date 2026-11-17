@@ -2,18 +2,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
-import { Modal } from '../components/common/Modal';
-import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Clock } from 'lucide-react';
-import { tasksApi, studyPlansApi } from '../lib/api/client';
-import { StudyPlan, Task } from '../types';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock } from 'lucide-react';
+import { tasksApi, studyPlansApi, STUDY_PLANS_UPDATED_EVENT } from '../lib/api/client';
+import { ApiStudyPlan, Task } from '../types';
 import {
   addCalendarDays,
   getCalendarEvents,
   getCalendarGridDates,
+  getStudyTimeZoneSummary,
   groupCalendarEvents,
   toDateKey,
 } from '../lib/calendar';
 import { cn } from '../lib/utils';
+import { Link } from 'react-router-dom';
 
 export const CalendarPage: React.FC = () => {
   const [currentView, setCurrentView] = useState<'month' | 'week' | 'day'>('month');
@@ -23,27 +24,25 @@ export const CalendarPage: React.FC = () => {
   });
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
+  const [studyPlans, setStudyPlans] = useState<ApiStudyPlan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
-
-  const [eventTitle, setEventTitle] = useState('');
-  const [eventTime, setEventTime] = useState('14:00');
-  const [eventType, setEventType] = useState<'task' | 'study'>('study');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
 
-    Promise.all([tasksApi.getTasks(), studyPlansApi.getPlan()])
-      .then(([loadedTasks, loadedPlan]) => {
+    setIsLoading(true);
+    setLoadError(null);
+    Promise.all([tasksApi.getTasks(), studyPlansApi.getCalendarPlans()])
+      .then(([loadedTasks, loadedPlans]) => {
         if (!active) return;
         setTasks(loadedTasks);
-        setStudyPlan(loadedPlan);
+        setStudyPlans(loadedPlans);
       })
       .catch((error: unknown) => {
         if (active) {
-          setLoadError(error instanceof Error ? error.message : 'Unable to load calendar events.');
+          setLoadError(error instanceof Error ? error.message : 'Unable to load calendar data.');
         }
       })
       .finally(() => {
@@ -53,6 +52,12 @@ export const CalendarPage: React.FC = () => {
     return () => {
       active = false;
     };
+  }, [reloadKey]);
+
+  useEffect(() => {
+    const refreshCalendar = () => setReloadKey((key) => key + 1);
+    window.addEventListener(STUDY_PLANS_UPDATED_EVENT, refreshCalendar);
+    return () => window.removeEventListener(STUDY_PLANS_UPDATED_EVENT, refreshCalendar);
   }, []);
 
   const monthDates = useMemo(() => getCalendarGridDates(currentMonth), [currentMonth]);
@@ -65,10 +70,14 @@ export const CalendarPage: React.FC = () => {
   const firstVisibleDate = visibleDates[0];
   const lastVisibleDate = visibleDates[visibleDates.length - 1];
   const events = useMemo(
-    () => getCalendarEvents(tasks, studyPlan, firstVisibleDate, addCalendarDays(lastVisibleDate, 1)),
-    [tasks, studyPlan, firstVisibleDate, lastVisibleDate]
+    () => getCalendarEvents(tasks, studyPlans, firstVisibleDate, addCalendarDays(lastVisibleDate, 1)),
+    [tasks, studyPlans, firstVisibleDate, lastVisibleDate]
   );
   const eventsByDate = useMemo(() => groupCalendarEvents(events), [events]);
+  const studyTimeZoneSummary = useMemo(
+    () => getStudyTimeZoneSummary(studyPlans),
+    [studyPlans]
+  );
   const selectedDateKey = toDateKey(selectedDate);
   const selectedDayEvents = eventsByDate.get(selectedDateKey) || [];
   const monthLabel = new Intl.DateTimeFormat(undefined, {
@@ -100,13 +109,6 @@ export const CalendarPage: React.FC = () => {
     setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
   };
 
-  const handleCreateEvent = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!eventTitle.trim()) return;
-    alert(`Scheduled: ${eventTitle} on ${selectedDateKey} at ${eventTime}`);
-    setIsEventModalOpen(false);
-  };
-
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -115,7 +117,7 @@ export const CalendarPage: React.FC = () => {
             Schedule & Calendar
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
-            Coordinate tasks and study sessions from your Taskora data.
+            Study session times are shown in {studyTimeZoneSummary}.
           </p>
         </div>
 
@@ -138,10 +140,12 @@ export const CalendarPage: React.FC = () => {
             ))}
           </div>
 
-          <Button variant="primary" size="sm" pill onClick={() => setIsEventModalOpen(true)}>
-            <Plus className="w-4 h-4" />
-            <span>Add Event</span>
-          </Button>
+          <Link
+            to="/study-planner"
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-primary/90"
+          >
+            Manage study plans
+          </Link>
         </div>
       </div>
 
@@ -259,7 +263,9 @@ export const CalendarPage: React.FC = () => {
                             : 'bg-soft-pink text-soft-pink-text dark:bg-pink-950/60 dark:text-pink-300'
                         )}
                       >
-                        {calendarEvent.time ? `${calendarEvent.time} ` : ''}{calendarEvent.title}
+                        {calendarEvent.time ? `${calendarEvent.time} ` : ''}
+                        {calendarEvent.timeZone ? `${calendarEvent.timeZone} ` : ''}
+                        {calendarEvent.title}
                       </div>
                     ))}
                     {dayEvents.length > (currentView === 'month' ? 2 : 6) && (
@@ -273,8 +279,15 @@ export const CalendarPage: React.FC = () => {
             })}
           </div>
 
-          {isLoading && <p className="text-xs text-muted-purple mt-4">Loading Taskora events...</p>}
-          {loadError && <p className="text-xs text-rose-500 mt-4" role="status">{loadError}</p>}
+          {isLoading && <p className="text-xs text-muted-purple mt-4" role="status">Loading your tasks and study schedules...</p>}
+          {loadError && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-500" role="alert">
+              <span>{loadError}</span>
+              <Button variant="outline" size="sm" onClick={() => setReloadKey((key) => key + 1)}>
+                Retry
+              </Button>
+            </div>
+          )}
         </Card>
 
         <Card className="p-6 space-y-4">
@@ -312,6 +325,7 @@ export const CalendarPage: React.FC = () => {
                     {calendarEvent.time
                       ? `${calendarEvent.time}${calendarEvent.endTime ? ` – ${calendarEvent.endTime}` : ''}`
                       : 'Due today'}
+                    {calendarEvent.timeZone ? ` · ${calendarEvent.timeZone}` : ''}
                   </span>
                   <Badge variant={calendarEvent.type === 'study' ? 'mint' : 'pink'}>
                     {calendarEvent.type === 'study' ? 'Study session' : 'Task'}
@@ -326,90 +340,19 @@ export const CalendarPage: React.FC = () => {
               </div>
             ))}
             {!isLoading && !loadError && selectedDayEvents.length === 0 && (
-              <p className="text-xs text-muted-purple">Nothing scheduled for this day.</p>
+              <p className="text-xs text-muted-purple">
+                {studyPlans.length === 0 && tasks.length === 0
+                  ? 'No study plans or tasks are available yet.'
+                  : 'Nothing scheduled for this day.'}
+              </p>
             )}
           </div>
 
-          <div className="pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              pill
-              className="w-full text-xs"
-              onClick={() => setIsEventModalOpen(true)}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Schedule Session for {selectedDate.getDate()}</span>
-            </Button>
-          </div>
+          <Link to="/study-planner" className="block pt-2 text-center text-xs font-semibold text-primary hover:underline">
+            Create or edit a study plan
+          </Link>
         </Card>
       </div>
-
-      <Modal
-        isOpen={isEventModalOpen}
-        onClose={() => setIsEventModalOpen(false)}
-        title="Schedule Study Event or Deadline"
-        description="Add a commitment directly to your calendar."
-      >
-        <form onSubmit={handleCreateEvent} className="space-y-4 pt-2">
-          <div>
-            <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1">
-              Event Title
-            </label>
-            <input
-              type="text"
-              required
-              value={eventTitle}
-              onChange={(event) => setEventTitle(event.target.value)}
-              placeholder="e.g. Discrete Math Homework Sprint"
-              className="w-full text-xs px-3.5 py-2.5 rounded-2xl border border-subtle bg-white dark:bg-[#181131] text-deep-purple dark:text-white focus:outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1">
-                Type
-              </label>
-              <select
-                value={eventType}
-                onChange={(event) => setEventType(event.target.value as 'task' | 'study')}
-                className="w-full text-xs px-3 py-2 rounded-2xl border border-subtle bg-white dark:bg-[#181131]"
-              >
-                <option value="study">Study Session</option>
-                <option value="task">Assignment Deadline</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1">
-                Time
-              </label>
-              <input
-                type="time"
-                value={eventTime}
-                onChange={(event) => setEventTime(event.target.value)}
-                className="w-full text-xs px-3 py-2 rounded-2xl border border-subtle bg-white dark:bg-[#181131]"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-subtle">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              pill
-              onClick={() => setIsEventModalOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" size="sm" pill>
-              Save Event
-            </Button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 };
