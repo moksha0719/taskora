@@ -80,7 +80,21 @@ async function requestApi<T>(path: string, options: RequestInit = {}): Promise<T
     return undefined as T;
   }
 
-  const body = await response.json() as { error?: string } & Record<string, unknown>;
+  const responseText = await response.text();
+  let body: { error?: string } & Record<string, unknown>;
+  try {
+    body = JSON.parse(responseText) as { error?: string } & Record<string, unknown>;
+  } catch (cause) {
+    if (!(cause instanceof SyntaxError)) throw cause;
+    const responseType = response.ok
+      ? 'The API returned a non-JSON response.'
+      : `The API returned a non-JSON error response (HTTP ${response.status}).`;
+    throw new ApiError(
+      `${responseType} Check VITE_API_BASE_URL and verify that the backend endpoint is available.`,
+      response.status
+    );
+  }
+
   if (!response.ok) {
     throw new ApiError(
       typeof body.error === 'string' ? body.error : `Request failed with status ${response.status}`,
