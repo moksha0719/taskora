@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Eye, EyeOff, ArrowRight, Lock, Mail, User as UserIcon, Check } from 'lucide-react';
 
 export const RegisterPage: React.FC = () => {
-  const { register } = useAuth();
+  const { register, authError } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
@@ -16,6 +16,7 @@ export const RegisterPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Password strength calculation
   const getPasswordStrength = () => {
@@ -37,18 +38,21 @@ export const RegisterPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirmPassword) {
-      alert('Passwords do not match');
+      setFormError('Passwords do not match.');
       return;
     }
     if (!agreeTerms) {
-      alert('Please agree to the terms to proceed');
+      setFormError('Please agree to the terms to proceed.');
       return;
     }
 
     setLoading(true);
+    setFormError(null);
     try {
-      await register(name, email);
-      navigate('/dashboard');
+      const message = await register(name, email, password);
+      navigate('/login', { replace: true, state: { message } });
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Unable to create your account.');
     } finally {
       setLoading(false);
     }
@@ -105,6 +109,12 @@ export const RegisterPage: React.FC = () => {
             </p>
           </div>
 
+          {(formError || authError) && (
+            <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              {formError || authError}
+            </p>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-3.5">
             <div>
               <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1">
@@ -115,6 +125,7 @@ export const RegisterPage: React.FC = () => {
                 <input
                   type="text"
                   required
+                  maxLength={100}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full text-xs pl-10 pr-4 py-2.5 rounded-2xl border border-subtle bg-white dark:bg-[#181131] text-deep-purple dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
@@ -189,6 +200,8 @@ export const RegisterPage: React.FC = () => {
                 <input
                   type="password"
                   required
+                  minLength={8}
+                  maxLength={72}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="w-full text-xs pl-10 pr-4 py-2.5 rounded-2xl border border-subtle bg-white dark:bg-[#181131] text-deep-purple dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"

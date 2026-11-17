@@ -6,7 +6,6 @@ import {
   Sun,
   Moon,
   Menu,
-  ShieldCheck,
   User as UserIcon,
   CheckCircle2,
   Sparkles,
@@ -22,7 +21,7 @@ interface TopBarProps {
 }
 
 export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
-  const { user, logout, switchUserRole } = useAuth();
+  const { user, logout } = useAuth();
   const { config, toggleDarkMode } = useTheme();
   const navigate = useNavigate();
 
@@ -86,16 +85,6 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
             </span>
           </div>
         </div>
-
-        {/* Role Switcher Pill for instant testing of Admin vs Student */}
-        <button
-          onClick={() => switchUserRole(user?.role === 'admin' ? 'student' : 'admin')}
-          title="Click to toggle between Student and Admin mode"
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-primary-subtle text-primary border border-primary/20 hover:scale-105 transition-all shadow-sm"
-        >
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span>Role: <strong className="capitalize">{user?.role}</strong></span>
-        </button>
 
         {/* Search Icon Trigger */}
         <button
