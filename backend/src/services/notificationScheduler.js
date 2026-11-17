@@ -48,6 +48,13 @@ function getZonedParts(date, timeZone) {
     };
 }
 
+function planDateKey(value, field) {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+        throw new TypeError(`Study plan ${field} must be a valid date`);
+    }
+    return value.toISOString().slice(0, 10);
+}
+
 function localDateString(year, month, day) {
     return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
@@ -93,6 +100,8 @@ function getStudyReminderOccurrence(item, now, reminderWindowMs = STUDY_REMINDER
         return null;
     }
 
+    const planStartDate = planDateKey(plan.startDate, "startDate");
+    const planEndDate = planDateKey(plan.endDate, "endDate");
     const localNow = getZonedParts(now, plan.timeZone);
     const localMidnightUtc = Date.UTC(localNow.year, localNow.month - 1, localNow.day);
     const latestStart = now.getTime() + reminderWindowMs;
@@ -107,6 +116,10 @@ function getStudyReminderOccurrence(item, now, reminderWindowMs = STUDY_REMINDER
         const year = candidateDate.getUTCFullYear();
         const month = candidateDate.getUTCMonth() + 1;
         const day = candidateDate.getUTCDate();
+        const occurrenceDate = localDateString(year, month, day);
+        if (occurrenceDate < planStartDate || occurrenceDate > planEndDate) {
+            continue;
+        }
         const startsAt = localDateTimeToUtc(
             year,
             month,
@@ -120,7 +133,7 @@ function getStudyReminderOccurrence(item, now, reminderWindowMs = STUDY_REMINDER
             startsAt.getTime() <= latestStart
         ) {
             return {
-                occurrenceDate: localDateString(year, month, day),
+                occurrenceDate,
                 startsAt
             };
         }
@@ -180,6 +193,8 @@ function createNotificationScheduler({
                                 userId: true,
                                 title: true,
                                 timeZone: true,
+                                startDate: true,
+                                endDate: true,
                                 status: true
                             }
                         }

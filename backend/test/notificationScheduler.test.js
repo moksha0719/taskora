@@ -17,7 +17,11 @@ test("study reminder occurrence uses the plan timezone and local schedule day", 
         startMinuteOfDay: 720,
         subject: {
             name: "Mathematics",
-            plan: { timeZone: "Asia/Colombo" }
+            plan: {
+                timeZone: "Asia/Colombo",
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-12-20T00:00:00.000Z")
+            }
         }
     }, new Date("2026-11-16T06:15:00.000Z"));
 
@@ -34,11 +38,60 @@ test("study reminders skip nonexistent local times during a daylight-saving tran
         startMinuteOfDay: 150,
         subject: {
             name: "Physics",
-            plan: { timeZone: "America/New_York" }
+            plan: {
+                timeZone: "America/New_York",
+                startDate: new Date("2026-03-08T00:00:00.000Z"),
+                endDate: new Date("2026-03-08T00:00:00.000Z")
+            }
         }
     }, new Date("2026-03-08T06:00:00.000Z"));
 
     assert.equal(occurrence, null);
+});
+
+test("study reminders stay within inclusive plan dates in the plan timezone", () => {
+    const item = {
+        dayOfWeek: "MON",
+        startMinuteOfDay: 720,
+        subject: {
+            name: "Mathematics",
+            plan: {
+                timeZone: "Asia/Colombo",
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-11-30T00:00:00.000Z")
+            }
+        }
+    };
+    const occurrenceForDate = (date) => getStudyReminderOccurrence(
+        item,
+        new Date(`${date}T06:15:00.000Z`)
+    );
+
+    assert.equal(occurrenceForDate("2026-11-09"), null);
+    assert.equal(occurrenceForDate("2026-11-16").occurrenceDate, "2026-11-16");
+    assert.equal(occurrenceForDate("2026-11-23").occurrenceDate, "2026-11-23");
+    assert.equal(occurrenceForDate("2026-11-30").occurrenceDate, "2026-11-30");
+    assert.equal(occurrenceForDate("2026-12-07"), null);
+});
+
+test("Colombo plan date uses its local date across a UTC day rollover", () => {
+    const occurrence = getStudyReminderOccurrence({
+        dayOfWeek: "MON",
+        startMinuteOfDay: 30,
+        subject: {
+            name: "Physics",
+            plan: {
+                timeZone: "Asia/Colombo",
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-11-16T00:00:00.000Z")
+            }
+        }
+    }, new Date("2026-11-15T18:45:00.000Z"));
+
+    assert.deepEqual(occurrence, {
+        occurrenceDate: "2026-11-16",
+        startsAt: new Date("2026-11-15T19:00:00.000Z")
+    });
 });
 
 test("scheduler emits due-task and study-session reminders once using database dedupe keys", async () => {
@@ -60,6 +113,8 @@ test("scheduler emits due-task and study-session reminders once using database d
                 userId: USER_ID,
                 title: "Fall plan",
                 timeZone: "Asia/Colombo",
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-12-20T00:00:00.000Z"),
                 status: "ACTIVE"
             }
         }
@@ -117,6 +172,14 @@ test("scheduler emits due-task and study-session reminders once using database d
     assert.deepEqual(prismaCalls[1][1].where.subject.is.plan.is.status, {
         in: ["DRAFT", "ACTIVE"]
     });
+    assert.equal(
+        prismaCalls[1][1].include.subject.include.plan.select.startDate,
+        true
+    );
+    assert.equal(
+        prismaCalls[1][1].include.subject.include.plan.select.endDate,
+        true
+    );
 });
 
 test("scheduler excludes tasks outside the reminder window and completed tasks by query", async () => {
@@ -163,6 +226,8 @@ test("scheduler intentionally skips reminders that became overdue during downtim
                 id: PLAN_ID,
                 userId: USER_ID,
                 timeZone: "Asia/Colombo",
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-12-20T00:00:00.000Z"),
                 status: "ACTIVE"
             }
         }
