@@ -24,6 +24,8 @@ function createStudyPlanRouter(studyPlanService, studyScheduleService, scheduleC
     );
     router.get("/", controller.list);
     router.get("/active", controller.getActive);
+    router.post("/:id/activate", controller.activate);
+    router.post("/:id/deactivate", controller.deactivate);
     router.get("/:id", controller.getById);
     router.put("/:id/schedule", controller.saveSchedule);
     router.put("/:id", controller.update);

@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "rootDir": "generated/prisma",
+    "outDir": "build/generated/prisma",
+    "rewriteRelativeImportExtensions": true,
+    "noEmitOnError": true
+  },
+  "include": ["generated/prisma/**/*.ts"]
+}

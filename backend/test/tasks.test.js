@@ -341,6 +341,33 @@ test("task creation and updates reject invalid fields and values", async () => {
     });
 });
 
+test("task text fields accept configured boundaries and reject overlong or blank text", async () => {
+    await withServer(createPrismaMock(), async (request) => {
+        const title = "T".repeat(120);
+        const description = "D".repeat(1000);
+        const accepted = await request("/api/tasks", jsonRequest("POST", {
+            title,
+            description
+        }));
+        assert.equal(accepted.status, 201);
+
+        for (const body of [
+            { title: `${title}T` },
+            { title: "Valid title", description: `${description}D` },
+            { title: "Valid title", description: "   " }
+        ]) {
+            const response = await request("/api/tasks", jsonRequest("POST", body));
+            assert.equal(response.status, 400);
+        }
+
+        const invalidPartialUpdate = await request(
+            `/api/tasks/${TASK_A}`,
+            jsonRequest("PUT", { description: "   " })
+        );
+        assert.equal(invalidPartialUpdate.status, 400);
+    });
+});
+
 test("due-date validation accepts valid four-digit years below 0100", async () => {
     await withServer(createPrismaMock(), async (request) => {
         const response = await request("/api/tasks", jsonRequest("POST", {

@@ -24,9 +24,11 @@ The study-plan router applies authentication to every endpoint. Middleware verif
 | `DELETE` | `/api/study-plans/:id` | `204`, no response body |
 | `PUT` | `/api/study-plans/:id/schedule` | `200`, `{ "studyPlan": ... }` |
 | `POST` | `/api/study-plans/generate` | `200`, `{ "schedule": [...] }` |
-| `GET` | `/api/study-plans/:planId/completions?from=YYYY-MM-DD&to=YYYY-MM-DD` | `200`, `{ "completions": [...] }` |
+| `GET` | `/api/study-plans/:planId/completions?from=YYYY-MM-DD&to=YYYY-MM-DD` | `200`, `{ "completions": [...], "pagination": {...} }` |
 | `PUT` | `/api/study-plans/:planId/schedule-items/:itemId/completions/:date` | `200`, `{ "completion": ... }` |
 | `DELETE` | `/api/study-plans/:planId/schedule-items/:itemId/completions/:date` | `200`, `{ "completion": ..., "deleted": true }` |
+| `POST` | `/api/study-plans/:id/activate` | `200`, `{ "studyPlan": ... }` |
+| `POST` | `/api/study-plans/:id/deactivate` | `200`, `{ "studyPlan": ... }` |
 
 `/active` and `/generate` are static paths, not plan IDs. Plan and schedule-item IDs in paths must match the UUID shape `8-4-4-4-12` hexadecimal characters.
 
@@ -72,14 +74,16 @@ Plan `startDate` and `endDate` are civil dates and are returned as
 the plan's IANA timezone; when omitted, that timezone defaults to
 `Asia/Colombo`.
 
+Each plan title is limited to 120 characters. Each plan supports 1–12 subjects.
+
 Each subject requires:
 
-- `name`: non-empty string; trimmed and unique case-insensitively within the plan.
+- `name`: non-empty string of at most 120 characters; trimmed and unique case-insensitively within the plan.
 - `targetMinutesPerWeek`: positive safe integer.
 
 Optional subject fields:
 
-- `code`: string; trimmed. If omitted, the service stores `""`.
+- `code`: non-empty string of at most 32 characters; trimmed. If omitted, the service stores `""`.
 - `color`: six-digit hex color such as `#9885E8`; if omitted, the service stores `#9885E8`.
 
 The sum of all `subjects[].targetMinutesPerWeek` values must equal `weeklyTargetMinutes`. `userId`, `status`, and other unsupported fields are rejected.
@@ -119,7 +123,31 @@ Example create response (IDs and timestamps are illustrative):
 
 `GET /api/study-plans` returns only the caller's plans, each with its subjects. `GET /api/study-plans/active` returns the caller's active plan with subjects and their schedule items, or `null`. `GET /api/study-plans/:id` returns an owned plan with subjects and schedule items. Schedule items include their schema scalar fields, including `dayOfWeek`, `startMinuteOfDay`, `durationMinutes`, `kind`, and `topics`; completion records are not included in these responses.
 
-`DELETE /api/study-plans/:id` deletes only `DRAFT` or `ARCHIVED` plans. `ACTIVE` plans cannot be deleted. This API has no activation endpoint; clients cannot change a plan's status via create or update.
+`DELETE /api/study-plans/:id` deletes only owned `DRAFT` or `ARCHIVED` plans
+that have no completed sessions. `ACTIVE` plans cannot be deleted. If a plan
+has completion history, the request returns `409` and leaves the plan and all
+history intact. Clients cannot set plan status through create or update;
+activation and deactivation are explicit operations.
+
+### Activation, switching, and deactivation
+
+`POST /api/study-plans/:id/activate` activates an owned eligible plan. An
+`ARCHIVED` plan or a plan whose end date has passed in its configured timezone
+cannot be activated. Every subject must have a saved schedule. A future
+start-date plan may be activated if its end date has not passed.
+
+The database's existing `activeUserId` uniqueness and consistency constraint
+allows at most one active plan per user. Activating a different eligible plan
+switches the current active plan to `DRAFT` and activates the selected plan in
+one transaction. It does not delete or replace schedules or completion
+records. The response contains the updated plan, including `status: "ACTIVE"`
+and its `activeUserId`.
+
+`POST /api/study-plans/:id/deactivate` changes the caller's active plan to
+`DRAFT` and clears `activeUserId`. It preserves the plan, schedule, and
+completed-session history. A missing or another user's plan returns `404`;
+an ineligible, already inactive, or otherwise conflicting plan returns
+`409`. Activation, switching, and deactivation require authentication.
 
 ## Schedule generation preview
 
@@ -239,16 +267,27 @@ The complete schedule must:
 
 Saving replaces the plan's existing schedule in a transaction. The plan must belong to the caller and must not be `ARCHIVED`. A schedule with recorded completions cannot be replaced. The response is `{ "studyPlan": ... }` with the persisted subjects and schedule items. Another user's or missing plan returns `404`; an archived plan or schedule with completions returns `409`; malformed or inconsistent schedules return `400`.
 
-The schedule-save API does not activate a plan. The current backend has no plan activation endpoint.
+Saving a schedule does not activate a plan. Activation and deactivation are
+separate endpoints documented above.
 
 ## Schedule completion
 
 ### Listing completion history
 
 `GET /api/study-plans/:planId/completions` returns completions for schedule
-items belonging to the caller's plan. Both query parameters are required,
-strict `YYYY-MM-DD` calendar dates. The range includes `from` and excludes
-`to`; `to` must be after `from`.
+items belonging to the caller's plan. `from` and `to` are required strict
+`YYYY-MM-DD` calendar dates. The range includes `from` and excludes `to`;
+`to` must be after `from` and no more than 365 days after `from`. The result is
+paginated to bound each database read:
+
+| Parameter | Optional | Validation/default |
+| --- | --- | --- |
+| `page` | Yes | Positive integer from 1 through 1,300; defaults to `1`. |
+| `limit` | Yes | Positive integer from 1 through 100; defaults to `100`. |
+
+The maximum offset is 129,900. Results retain the existing deterministic
+ordering (occurrence date, then schedule-item ID) and the response adds
+pagination metadata.
 
 ```http
 GET /api/study-plans/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/completions?from=2026-11-16&to=2026-11-23
@@ -267,15 +306,23 @@ Success (`200`), ordered by occurrence date and then schedule-item ID:
       "completedAt": "2026-11-16T12:00:00.000Z",
       "actualDurationMinutes": 45
     }
-  ]
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 100,
+    "total": 1,
+    "totalPages": 1
+  }
 }
 ```
 
 `occurrenceDate` is a civil date returned as `YYYY-MM-DD`, not an instant.
 `completedAt` remains a UTC ISO timestamp. If no records match, the response
-is `{ "completions": [] }`. Malformed plan IDs return `400`; well-formed but
+is `{ "completions": [], "pagination": { "page": 1, "limit": 100, "total": 0, "totalPages": 0 } }`.
+Malformed plan IDs return `400`; well-formed but
 nonexistent plans and plans belonging to another user return `404`. Invalid
-dates, a non-increasing range, or unsupported query parameters return `400`.
+dates, ranges over 365 days, invalid pagination, or unsupported query
+parameters return `400`.
 Authentication is required.
 
 The date is in the URL, not the body. `PUT` creates a completion or updates the existing completion for the same schedule item and date.
@@ -343,10 +390,12 @@ All notification endpoints use the JWT authentication described above. Notificat
 | --- | --- | --- |
 | `type` | Yes | One of `task_due`, `task_completed`, `study_reminder`, `study_plan_updated`, `system`. |
 | `unreadOnly` | Yes | Exactly `true` or `false`; defaults to `false`. |
-| `page` | Yes | Positive integer; defaults to `1`. |
+| `page` | Yes | Positive integer from 1 through 1,000; defaults to `1`. |
 | `limit` | Yes | Positive integer up to `100`; defaults to `20`. |
 
-Unknown query parameters and malformed values return `400`. Notifications are ordered newest first, with ID as a stable tie-breaker. Example:
+The page and limit must also produce an offset no greater than 99,900. Unknown
+query parameters and malformed or out-of-range values return `400`.
+Notifications are ordered newest first, with ID as a stable tie-breaker. Example:
 
 ```http
 GET /api/notifications?type=task_due&unreadOnly=true&page=1&limit=20
@@ -390,6 +439,12 @@ The backend creates these notifications internally:
   within the inclusive plan start/end dates.
 - `system`: supported as a notification type for trusted internal backend use; no public client creation route exists.
 
+Before creating a related notification, the backend verifies within the
+notification write transaction that its task, study plan, or schedule item
+belongs to the notification's `userId`. A cross-user or nonexistent
+relationship is rejected; system notifications without related records remain
+supported.
+
 Due-task and study-session reminders are checked by the backend scheduler once per minute. Database-unique deduplication keys prevent repeats across scheduler runs and concurrent instances. Study reminders are based only on saved schedule items, never on a preview. The scheduler interprets recurring weekdays and minute-of-day values in the study plan's IANA timezone, defaulting to `Asia/Colombo`, and enforces the inclusive plan date range using that timezone's local date. A local time that does not exist during a daylight-saving transition is skipped. Task due dates are stored as instants; date-only task inputs are interpreted as UTC midnight because tasks have no timezone field.
 
 ## Errors and status codes
@@ -405,18 +460,20 @@ Error responses use this JSON shape:
 | `400` | Invalid request body, unsupported field, invalid UUID/date/duration, or other validation failure. Invalid JSON also returns `400` with `{"error":"Invalid JSON payload"}`. |
 | `401` | Missing, invalid, or expired JWT. |
 | `404` | Plan, schedule item, or completion does not exist for the authenticated user's requested resource. Cross-user access is not disclosed separately. |
-| `409` | Plan is not in an allowed state for update/delete, or a handled Prisma unique-constraint conflict. |
+| `409` | Plan is not in an allowed state for update/delete, deleting a plan with completion history, or a handled Prisma conflict. |
 | `422` | Schedule request is valid but supplied availability cannot fit its weekly target. |
+| `413` | JSON request body exceeds the 1 MiB parser limit. |
+| `415` | Unsupported or missing content type on a body-bearing write request with an `Authorization` header. |
 | `500` | Unexpected internal error; response is always `{"error":"Internal server error"}`. |
 
 Plan deletion is the successful operation that returns no body (`204`).
 
 ## Ownership and authorization
 
-- Every endpoint is behind JWT authentication.
+- Every Study Planner and notification endpoint is behind JWT authentication.
 - Plan create associates the plan with the authenticated user; `userId` and `status` cannot be set in the request.
 - List, active lookup, read, update, and delete are scoped to the authenticated user.
 - Schedule completion operations verify both plan ownership and schedule-item membership in that plan before writing or deleting.
 - Schedule preview is stateless and does not persist anything. Its top-level request does not accept a client-supplied `userId`.
 - Schedule persistence, completion, and notification routes derive ownership only from the JWT's subject claim.
-- Notification reads, updates, and deletes include the authenticated user ID in their database filters. Repeated scheduler runs are protected by a unique deduplication key.
+- Notification reads, updates, and deletes include the authenticated user ID in their database filters. Related task, plan, and schedule references are checked against the notification owner before creation. Repeated scheduler runs are protected by a unique deduplication key.
