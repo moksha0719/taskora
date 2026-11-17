@@ -24,6 +24,7 @@ The study-plan router applies authentication to every endpoint. Middleware verif
 | `DELETE` | `/api/study-plans/:id` | `204`, no response body |
 | `PUT` | `/api/study-plans/:id/schedule` | `200`, `{ "studyPlan": ... }` |
 | `POST` | `/api/study-plans/generate` | `200`, `{ "schedule": [...] }` |
+| `GET` | `/api/study-plans/:planId/completions?from=YYYY-MM-DD&to=YYYY-MM-DD` | `200`, `{ "completions": [...] }` |
 | `PUT` | `/api/study-plans/:planId/schedule-items/:itemId/completions/:date` | `200`, `{ "completion": ... }` |
 | `DELETE` | `/api/study-plans/:planId/schedule-items/:itemId/completions/:date` | `200`, `{ "completion": ..., "deleted": true }` |
 
@@ -66,6 +67,11 @@ Optional plan field:
 
 - `timeZone`: valid, trimmed IANA timezone string. Defaults to `Asia/Colombo`.
 
+Plan `startDate` and `endDate` are civil dates and are returned as
+`YYYY-MM-DD`, without a time or UTC offset. Weekly schedule recurrences use
+the plan's IANA timezone; when omitted, that timezone defaults to
+`Asia/Colombo`.
+
 Each subject requires:
 
 - `name`: non-empty string; trimmed and unique case-insensitively within the plan.
@@ -78,7 +84,7 @@ Optional subject fields:
 
 The sum of all `subjects[].targetMinutesPerWeek` values must equal `weeklyTargetMinutes`. `userId`, `status`, and other unsupported fields are rejected.
 
-Successful create and update responses contain the persisted plan and its subjects. A plan includes the schema scalar fields `id`, `userId`, `activeUserId`, `title`, `status`, `startDate`, `endDate`, `timeZone`, `weeklyTargetMinutes`, `studyDaysPerWeek`, `createdAt`, and `updatedAt`. Prisma dates serialize as ISO date-time strings in JSON; for example, a stored date-only value is returned at UTC midnight.
+Successful create and update responses contain the persisted plan and its subjects. A plan includes the schema scalar fields `id`, `userId`, `activeUserId`, `title`, `status`, `startDate`, `endDate`, `timeZone`, `weeklyTargetMinutes`, `studyDaysPerWeek`, `createdAt`, and `updatedAt`. Plan `startDate` and `endDate` are serialized as civil dates in `YYYY-MM-DD` format; `createdAt` and `updatedAt` remain UTC ISO timestamps.
 
 Example create response (IDs and timestamps are illustrative):
 
@@ -90,8 +96,8 @@ Example create response (IDs and timestamps are illustrative):
     "activeUserId": null,
     "title": "Fall Semester Plan",
     "status": "DRAFT",
-    "startDate": "2026-11-16T00:00:00.000Z",
-    "endDate": "2026-12-20T00:00:00.000Z",
+    "startDate": "2026-11-16",
+    "endDate": "2026-12-20",
     "timeZone": "Asia/Colombo",
     "weeklyTargetMinutes": 600,
     "studyDaysPerWeek": 4,
@@ -237,6 +243,41 @@ The schedule-save API does not activate a plan. The current backend has no plan 
 
 ## Schedule completion
 
+### Listing completion history
+
+`GET /api/study-plans/:planId/completions` returns completions for schedule
+items belonging to the caller's plan. Both query parameters are required,
+strict `YYYY-MM-DD` calendar dates. The range includes `from` and excludes
+`to`; `to` must be after `from`.
+
+```http
+GET /api/study-plans/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/completions?from=2026-11-16&to=2026-11-23
+Authorization: Bearer <JWT>
+```
+
+Success (`200`), ordered by occurrence date and then schedule-item ID:
+
+```json
+{
+  "completions": [
+    {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "occurrenceDate": "2026-11-16",
+      "completedAt": "2026-11-16T12:00:00.000Z",
+      "actualDurationMinutes": 45
+    }
+  ]
+}
+```
+
+`occurrenceDate` is a civil date returned as `YYYY-MM-DD`, not an instant.
+`completedAt` remains a UTC ISO timestamp. If no records match, the response
+is `{ "completions": [] }`. Malformed plan IDs return `400`; well-formed but
+nonexistent plans and plans belonging to another user return `404`. Invalid
+dates, a non-increasing range, or unsupported query parameters return `400`.
+Authentication is required.
+
 The date is in the URL, not the body. `PUT` creates a completion or updates the existing completion for the same schedule item and date.
 
 ```http
@@ -259,26 +300,30 @@ Successful `PUT` response:
   "completion": {
     "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    "occurrenceDate": "2026-11-16T00:00:00.000Z",
+    "occurrenceDate": "2026-11-16",
     "completedAt": "2026-11-16T12:00:00.000Z",
     "actualDurationMinutes": 45
   }
 }
 ```
 
-The `date` path parameter must be a real `YYYY-MM-DD` calendar date. `DELETE` does not use a request body and returns the deleted key:
+For `PUT`, the `date` path parameter must be a real `YYYY-MM-DD` calendar date
+within the plan's inclusive `startDate` and `endDate` range. Occurrences on
+either boundary date are accepted; dates outside the plan range return `400`.
+`DELETE` does not use a request body and returns the deleted key, with the
+occurrence date in the same civil-date format:
 
 ```json
 {
   "completion": {
     "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    "occurrenceDate": "2026-11-16T00:00:00.000Z"
+    "occurrenceDate": "2026-11-16"
   },
   "deleted": true
 }
 ```
 
-The service verifies that the plan belongs to the authenticated user and that the schedule item belongs to that plan. A plan or item that is missing, belongs to another user, or belongs to another plan is reported as not found. The schema's unique constraint is `(scheduleItemId, occurrenceDate)`. The service does not additionally require the occurrence date to fall within the plan's start/end dates or to match the item's weekday.
+The service verifies that the plan belongs to the authenticated user and that the schedule item belongs to that plan. A plan or item that is missing, belongs to another user, or belongs to another plan is reported as not found. The schema's unique constraint is `(scheduleItemId, occurrenceDate)`. The service does not additionally require the occurrence date to match the item's weekday.
 
 ## Notifications
 
@@ -340,10 +385,12 @@ The backend creates these notifications internally:
 - `task_completed`: when an owned task changes to `COMPLETED`; repeated updates to an already-completed task do not create another event notification.
 - `study_plan_updated`: after an owned `DRAFT` plan update commits.
 - `task_due`: for non-completed tasks due within the next 24 hours.
-- `study_reminder`: 15 minutes before a persisted weekly schedule item.
+- `study_reminder`: 15 minutes before a persisted weekly schedule item, only
+  when the candidate occurrence's local date in the plan timezone falls
+  within the inclusive plan start/end dates.
 - `system`: supported as a notification type for trusted internal backend use; no public client creation route exists.
 
-Due-task and study-session reminders are checked by the backend scheduler once per minute. Database-unique deduplication keys prevent repeats across scheduler runs and concurrent instances. Study reminders are based only on saved schedule items, never on a preview. The scheduler uses the study plan's IANA timezone; a local time that does not exist during a daylight-saving transition is skipped. Task due dates are stored as instants; date-only task inputs are interpreted as UTC midnight because tasks have no timezone field.
+Due-task and study-session reminders are checked by the backend scheduler once per minute. Database-unique deduplication keys prevent repeats across scheduler runs and concurrent instances. Study reminders are based only on saved schedule items, never on a preview. The scheduler interprets recurring weekdays and minute-of-day values in the study plan's IANA timezone, defaulting to `Asia/Colombo`, and enforces the inclusive plan date range using that timezone's local date. A local time that does not exist during a daylight-saving transition is skipped. Task due dates are stored as instants; date-only task inputs are interpreted as UTC midnight because tasks have no timezone field.
 
 ## Errors and status codes
 

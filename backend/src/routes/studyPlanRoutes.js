@@ -13,6 +13,7 @@ function createStudyPlanRouter(studyPlanService, studyScheduleService, scheduleC
 
     router.post("/", controller.create);
     router.post("/generate", controller.generateSchedulePreview);
+    router.get("/:planId/completions", controller.listScheduleCompletions);
     router.put(
         "/:planId/schedule-items/:itemId/completions/:date",
         controller.upsertScheduleCompletion

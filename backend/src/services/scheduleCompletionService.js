@@ -117,10 +117,16 @@ function validateCompletionInput(input) {
     return { occurrenceDate, actualDurationMinutes };
 }
 
-async function assertPlanAndScheduleItemOwnership(transaction, userId, planId, scheduleItemId) {
+async function assertPlanAndScheduleItemOwnership(
+    transaction,
+    userId,
+    planId,
+    scheduleItemId,
+    occurrenceDate
+) {
     const plan = await transaction.studyPlan.findFirst({
         where: { id: planId, userId },
-        select: { id: true }
+        select: { id: true, startDate: true, endDate: true }
     });
     if (!plan) {
         throw planNotFoundError();
@@ -143,9 +149,67 @@ async function assertPlanAndScheduleItemOwnership(transaction, userId, planId, s
     if (!scheduleItem) {
         throw scheduleItemNotFoundError();
     }
+
+    if (occurrenceDate) {
+        const occurrenceDateOnly = occurrenceDate.toISOString().slice(0, 10);
+        const startDateOnly = plan.startDate.toISOString().slice(0, 10);
+        const endDateOnly = plan.endDate.toISOString().slice(0, 10);
+        if (occurrenceDateOnly < startDateOnly || occurrenceDateOnly > endDateOnly) {
+            throw validationError("Occurrence date must fall within the study plan date range");
+        }
+    }
 }
 
 function createScheduleCompletionService({ prismaClient = prisma } = {}) {
+    async function listScheduleCompletions(userId, planId, from, to) {
+        assertUuid(userId, "Authenticated user ID");
+        assertUuid(planId, "Study plan ID");
+        const fromDate = validateOccurrenceDate(from);
+        const toDate = validateOccurrenceDate(to);
+        if (fromDate >= toDate) {
+            throw validationError("The to date must be after the from date");
+        }
+
+        try {
+            const plan = await prismaClient.studyPlan.findFirst({
+                where: { id: planId, userId },
+                select: { id: true }
+            });
+            if (!plan) {
+                throw planNotFoundError();
+            }
+
+            return await prismaClient.sessionCompletion.findMany({
+                where: {
+                    occurrenceDate: { gte: fromDate, lt: toDate },
+                    scheduleItem: {
+                        is: {
+                            subject: {
+                                is: {
+                                    planId,
+                                    plan: { is: { id: planId, userId } }
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: [
+                    { occurrenceDate: "asc" },
+                    { scheduleItemId: "asc" }
+                ],
+                select: {
+                    id: true,
+                    scheduleItemId: true,
+                    occurrenceDate: true,
+                    completedAt: true,
+                    actualDurationMinutes: true
+                }
+            });
+        } catch (error) {
+            throw mapPrismaError(error);
+        }
+    }
+
     async function upsertScheduleCompletion(userId, planId, scheduleItemId, input) {
         assertUuid(userId, "Authenticated user ID");
         assertUuid(planId, "Study plan ID");
@@ -158,7 +222,8 @@ function createScheduleCompletionService({ prismaClient = prisma } = {}) {
                     transaction,
                     userId,
                     planId,
-                    scheduleItemId
+                    scheduleItemId,
+                    occurrenceDate
                 );
 
                 return transaction.sessionCompletion.upsert({
@@ -209,7 +274,11 @@ function createScheduleCompletionService({ prismaClient = prisma } = {}) {
         }
     }
 
-    return { upsertScheduleCompletion, deleteScheduleCompletion };
+    return {
+        listScheduleCompletions,
+        upsertScheduleCompletion,
+        deleteScheduleCompletion
+    };
 }
 
 const scheduleCompletionService = createScheduleCompletionService();
