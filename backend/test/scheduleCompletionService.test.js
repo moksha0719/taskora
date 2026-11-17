@@ -13,7 +13,11 @@ const OCCURRENCE_DATE = "2026-11-16";
 function createPrismaMock(overrides = {}) {
     const transaction = {
         studyPlan: {
-            findFirst: async () => ({ id: PLAN_ID }),
+            findFirst: async () => ({
+                id: PLAN_ID,
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-12-20T00:00:00.000Z")
+            }),
             ...(overrides.transaction && overrides.transaction.studyPlan)
         },
         scheduleItem: {
@@ -46,6 +50,158 @@ function serviceError(promise, code, status, messagePattern) {
     });
 }
 
+test("lists owned plan completions with inclusive from and exclusive to dates", async () => {
+    const records = [
+        {
+            id: "before",
+            scheduleItemId: SCHEDULE_ITEM_ID,
+            occurrenceDate: new Date("2026-11-15T00:00:00.000Z")
+        },
+        {
+            id: "from",
+            scheduleItemId: SCHEDULE_ITEM_ID,
+            occurrenceDate: new Date("2026-11-16T00:00:00.000Z")
+        },
+        {
+            id: "before-to",
+            scheduleItemId: SCHEDULE_ITEM_ID,
+            occurrenceDate: new Date("2026-11-17T00:00:00.000Z")
+        },
+        {
+            id: "to",
+            scheduleItemId: SCHEDULE_ITEM_ID,
+            occurrenceDate: new Date("2026-11-18T00:00:00.000Z")
+        }
+    ];
+    let planQuery;
+    let completionQuery;
+    const service = createScheduleCompletionService({
+        prismaClient: {
+            studyPlan: {
+                findFirst: async (args) => {
+                    planQuery = args;
+                    return { id: PLAN_ID };
+                }
+            },
+            sessionCompletion: {
+                findMany: async (args) => {
+                    completionQuery = args;
+                    const { gte, lt } = args.where.occurrenceDate;
+                    return records.filter((record) =>
+                        record.occurrenceDate >= gte && record.occurrenceDate < lt
+                    );
+                }
+            }
+        }
+    });
+
+    const completions = await service.listScheduleCompletions(
+        USER_ID,
+        PLAN_ID,
+        "2026-11-16",
+        "2026-11-18"
+    );
+
+    assert.deepEqual(completions.map(({ id }) => id), ["from", "before-to"]);
+    assert.deepEqual(planQuery.where, { id: PLAN_ID, userId: USER_ID });
+    assert.deepEqual(completionQuery.where.occurrenceDate, {
+        gte: new Date("2026-11-16T00:00:00.000Z"),
+        lt: new Date("2026-11-18T00:00:00.000Z")
+    });
+    assert.deepEqual(completionQuery.where.scheduleItem, {
+        is: {
+            subject: {
+                is: {
+                    planId: PLAN_ID,
+                    plan: { is: { id: PLAN_ID, userId: USER_ID } }
+                }
+            }
+        }
+    });
+    assert.deepEqual(completionQuery.orderBy, [
+        { occurrenceDate: "asc" },
+        { scheduleItemId: "asc" }
+    ]);
+});
+
+test("does not query completions for a plan not owned by the caller", async () => {
+    let completionQueries = 0;
+    const service = createScheduleCompletionService({
+        prismaClient: {
+            studyPlan: {
+                findFirst: async ({ where }) => {
+                    assert.deepEqual(where, { id: PLAN_ID, userId: USER_ID });
+                    return null;
+                }
+            },
+            sessionCompletion: {
+                findMany: async () => {
+                    completionQueries += 1;
+                    return [];
+                }
+            }
+        }
+    });
+
+    await serviceError(
+        service.listScheduleCompletions(USER_ID, PLAN_ID, "2026-11-16", "2026-11-18"),
+        "PLAN_NOT_FOUND",
+        404
+    );
+    assert.equal(completionQueries, 0);
+});
+
+test("returns an empty list when no completions match", async () => {
+    const service = createScheduleCompletionService({
+        prismaClient: {
+            studyPlan: { findFirst: async () => ({ id: PLAN_ID }) },
+            sessionCompletion: { findMany: async () => [] }
+        }
+    });
+
+    assert.deepEqual(
+        await service.listScheduleCompletions(USER_ID, PLAN_ID, "2026-11-16", "2026-11-18"),
+        []
+    );
+});
+
+test("rejects malformed or non-increasing completion date ranges before querying", async () => {
+    let queries = 0;
+    const service = createScheduleCompletionService({
+        prismaClient: {
+            studyPlan: {
+                findFirst: async () => {
+                    queries += 1;
+                    return { id: PLAN_ID };
+                }
+            },
+            sessionCompletion: {
+                findMany: async () => {
+                    queries += 1;
+                    return [];
+                }
+            }
+        }
+    });
+
+    await serviceError(
+        service.listScheduleCompletions(USER_ID, PLAN_ID, "2026-02-30", "2026-03-01"),
+        "INVALID_INPUT",
+        400
+    );
+    await serviceError(
+        service.listScheduleCompletions(USER_ID, PLAN_ID, "2026-11-18", "2026-11-16"),
+        "INVALID_INPUT",
+        400
+    );
+    await serviceError(
+        service.listScheduleCompletions(USER_ID, PLAN_ID, "2026-11-16", "2026-11-16"),
+        "INVALID_INPUT",
+        400
+    );
+    assert.equal(queries, 0);
+});
+
 test("creates a completion transactionally for an owned schedule item", async () => {
     const calls = [];
     const service = createScheduleCompletionService({
@@ -56,7 +212,11 @@ test("creates a completion transactionally for an owned schedule item", async ()
                     studyPlan: {
                         findFirst: async (args) => {
                             calls.push(["plan", args]);
-                            return { id: PLAN_ID };
+                            return {
+                                id: PLAN_ID,
+                                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                                endDate: new Date("2026-12-20T00:00:00.000Z")
+                            };
                         }
                     },
                     scheduleItem: {
@@ -88,6 +248,11 @@ test("creates a completion transactionally for an owned schedule item", async ()
     assert.equal(completion.actualDurationMinutes, 45);
     assert.equal(calls[0], "transaction");
     assert.deepEqual(calls[1][1].where, { id: PLAN_ID, userId: USER_ID });
+    assert.deepEqual(calls[1][1].select, {
+        id: true,
+        startDate: true,
+        endDate: true
+    });
     assert.deepEqual(calls[2][1].where, {
         id: SCHEDULE_ITEM_ID,
         subject: {
@@ -102,6 +267,58 @@ test("creates a completion transactionally for an owned schedule item", async ()
         occurrenceDate: new Date("2026-11-16T00:00:00.000Z"),
         actualDurationMinutes: 45
     });
+});
+
+test("accepts completion occurrences on both inclusive plan boundary dates", async () => {
+    const savedDates = [];
+    const service = createScheduleCompletionService({
+        prismaClient: createPrismaMock({
+            transaction: {
+                sessionCompletion: {
+                    upsert: async ({ create }) => {
+                        savedDates.push(create.occurrenceDate.toISOString().slice(0, 10));
+                        return create;
+                    }
+                }
+            }
+        })
+    });
+
+    await service.upsertScheduleCompletion(USER_ID, PLAN_ID, SCHEDULE_ITEM_ID, {
+        occurrenceDate: "2026-11-16"
+    });
+    await service.upsertScheduleCompletion(USER_ID, PLAN_ID, SCHEDULE_ITEM_ID, {
+        occurrenceDate: "2026-12-20"
+    });
+
+    assert.deepEqual(savedDates, ["2026-11-16", "2026-12-20"]);
+});
+
+test("rejects completion occurrences outside the plan date range", async () => {
+    let upsertCalls = 0;
+    const service = createScheduleCompletionService({
+        prismaClient: createPrismaMock({
+            transaction: {
+                sessionCompletion: {
+                    upsert: async () => {
+                        upsertCalls += 1;
+                    }
+                }
+            }
+        })
+    });
+
+    for (const occurrenceDate of ["2026-11-15", "2026-12-21"]) {
+        await serviceError(
+            service.upsertScheduleCompletion(USER_ID, PLAN_ID, SCHEDULE_ITEM_ID, {
+                occurrenceDate
+            }),
+            "INVALID_INPUT",
+            400,
+            /within the study plan date range/
+        );
+    }
+    assert.equal(upsertCalls, 0);
 });
 
 test("allows null or omitted actual duration", async () => {
