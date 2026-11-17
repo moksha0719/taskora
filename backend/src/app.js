@@ -14,11 +14,18 @@ const defaultStudyScheduleService = require("./services/studyScheduleService");
 const defaultScheduleCompletionService = require("./services/scheduleCompletionService");
 const createNotificationRouter = require("./routes/notificationRoutes");
 const { createNotificationService } = require("./services/notificationService");
+const { createTaskService } = require("./services/taskService");
+const { createAiConversationService } = require("./services/aiConversationService");
+const { createBrainDumpWorkflowService } = require("./services/brainDumpWorkflowService");
+const logSafeError = require("./lib/logSafeError");
 
 function createApp({
     prismaClient = prisma,
     aiService = geminiService,
     brainDumpProcessingService = brainDumpService,
+    taskService,
+    aiConversationService,
+    brainDumpWorkflowService,
     studyPlanService,
     studyScheduleService = defaultStudyScheduleService,
     scheduleCompletionService = defaultScheduleCompletionService,
@@ -26,16 +33,60 @@ function createApp({
     env = process.env
 } = {}) {
     const notifications = notificationService || createNotificationService({ prismaClient });
+    const tasks = taskService || createTaskService({ prismaClient });
+    const conversations = aiConversationService || createAiConversationService({
+        prismaClient,
+        aiService,
+        taskService: tasks
+    });
+    const brainDumps = brainDumpWorkflowService || createBrainDumpWorkflowService({
+        prismaClient,
+        processingService: brainDumpProcessingService,
+        taskService: tasks
+    });
     const plans = studyPlanService || createStudyPlanService({
         prismaClient,
         notificationService: notifications
     });
     const app = express();
     const corsPolicy = createCorsPolicy(env);
+    const JSON_BODY_LIMIT = "1mb";
+
+    app.disable("x-powered-by");
+    app.use((req, res, next) => {
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("X-Frame-Options", "DENY");
+        res.setHeader("Referrer-Policy", "no-referrer");
+        res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+        res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+        next();
+    });
 
     app.use(corsPolicy.rejectUnapprovedOrigin);
     app.use(cors({ origin: corsPolicy.corsOrigin }));
-    app.use(express.json());
+    app.use(express.json({ limit: JSON_BODY_LIMIT, strict: true }));
+    app.use((req, res, next) => {
+        const contentLength = req.headers["content-length"];
+        const hasBody = (
+            contentLength !== undefined && contentLength !== "0"
+        ) || req.headers["transfer-encoding"] !== undefined;
+        const contentType = req.headers["content-type"];
+        const isWriteMethod = !["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase());
+        const isExplicitJsonOnlyRequest = Boolean(req.headers.authorization);
+        const isJsonContentType = typeof contentType === "string" &&
+            /^application\/json(?:\s*;|$)/i.test(contentType);
+
+        if (
+            isWriteMethod &&
+            hasBody &&
+            isExplicitJsonOnlyRequest &&
+            !isJsonContentType
+        ) {
+            return res.status(415).json({ error: "Unsupported content type" });
+        }
+
+        return next();
+    });
 
     app.get("/health/live", (req, res) => {
         return res.json({ status: "ok" });
@@ -46,10 +97,7 @@ function createApp({
             await prismaClient.$queryRaw`SELECT 1`;
             return res.json({ status: "ready" });
         } catch (error) {
-            console.error(
-                "Database readiness check failed:",
-                error && error.name ? error.name : "Error"
-            );
+            logSafeError("Database readiness check failed:", error);
             return res.status(503).json({ status: "not_ready" });
         }
     });
@@ -61,9 +109,9 @@ function createApp({
     });
 
     app.use("/api/auth", createAuthRouter(prismaClient));
-    app.use("/api/tasks", createTaskRouter(prismaClient, notifications));
-    app.use("/api/ai", createAiRouter(aiService));
-    app.use("/api/brain-dumps", createBrainDumpRouter(brainDumpProcessingService));
+    app.use("/api/tasks", createTaskRouter(prismaClient, notifications, tasks));
+    app.use("/api/ai", createAiRouter(aiService, conversations));
+    app.use("/api/brain-dumps", createBrainDumpRouter(brainDumpProcessingService, brainDumps));
     app.use(
         "/api/study-plans",
         createStudyPlanRouter(plans, studyScheduleService, scheduleCompletionService)
@@ -71,11 +119,19 @@ function createApp({
     app.use("/api/notifications", createNotificationRouter(notifications));
 
     app.use((error, req, res, next) => {
-        if (error.type === "entity.parse.failed") {
+        if (error && error.type === "entity.parse.failed") {
             return res.status(400).json({ error: "Invalid JSON payload" });
         }
 
-        console.error("Unhandled API error:", error.name || "Error");
+        if (error && error.type === "entity.too.large") {
+            return res.status(413).json({ error: "Request body exceeds the supported size limit" });
+        }
+
+        if (error && error.status === 415) {
+            return res.status(415).json({ error: "Unsupported content type" });
+        }
+
+        logSafeError("Unhandled API error:", error);
         return res.status(500).json({ error: "Internal server error" });
     });
 

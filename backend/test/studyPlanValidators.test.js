@@ -58,6 +58,47 @@ test("accepts a valid IANA time zone and optional subject fields", () => {
     assert.equal(result.data.timeZone, "America/New_York");
 });
 
+test("accepts plan and subject text/count limits at their exact boundaries", () => {
+    const subjects = Array.from({ length: 12 }, (_, index) => ({
+        name: `S${String(index).padStart(2, "0")}${"N".repeat(117)}`,
+        code: "C".repeat(32),
+        targetMinutesPerWeek: 50
+    }));
+    const result = validateStudyPlanCreateInput(validInput({
+        title: "P".repeat(120),
+        weeklyTargetMinutes: 600,
+        subjects
+    }));
+
+    assert.equal(result.data.title.length, 120);
+    assert.equal(result.data.subjects.length, 12);
+    assert.equal(result.data.subjects[0].name.length, 120);
+    assert.equal(result.data.subjects[0].code.length, 32);
+});
+
+test("rejects plan and subject text/count values above configured limits", () => {
+    const subjectSet = (count) => Array.from({ length: count }, (_, index) => ({
+        name: `Subject ${index}`,
+        targetMinutesPerWeek: 600 / count
+    }));
+    const inputs = [
+        validInput({ title: "P".repeat(121) }),
+        validInput({
+            weeklyTargetMinutes: 600,
+            subjects: [{ name: "N".repeat(121), targetMinutesPerWeek: 600 }]
+        }),
+        validInput({
+            weeklyTargetMinutes: 600,
+            subjects: [{ name: "Math", code: "C".repeat(33), targetMinutesPerWeek: 600 }]
+        }),
+        validInput({ subjects: subjectSet(13) })
+    ];
+
+    for (const input of inputs) {
+        assert.equal(typeof validateStudyPlanCreateInput(input).error, "string");
+    }
+});
+
 test("rejects missing fields, wrong types, and unknown or identity fields", () => {
     const missingFields = [
         "title",
@@ -149,7 +190,10 @@ test("rejects invalid, empty, duplicate, or unbalanced subjects", () => {
 test("rejects invalid optional subject field types and colors", () => {
     assert.match(validateStudyPlanCreateInput(validInput({
         subjects: [{ name: "Math", code: 123, targetMinutesPerWeek: 1200 }]
-    })).error, /code must be a string/);
+    })).error, /code must be a non-empty string/);
+    assert.match(validateStudyPlanCreateInput(validInput({
+        subjects: [{ name: "Math", code: "   ", targetMinutesPerWeek: 1200 }]
+    })).error, /code must be a non-empty string/);
     assert.match(validateStudyPlanCreateInput(validInput({
         subjects: [{ name: "Math", color: "purple", targetMinutesPerWeek: 1200 }]
     })).error, /six-digit hex color/);

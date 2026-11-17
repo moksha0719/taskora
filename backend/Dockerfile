@@ -12,8 +12,9 @@ ENV NODE_ENV=development
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
+COPY prisma.config.ts tsconfig.prisma.json ./
 RUN npm ci
-RUN npm run db:generate -- --schema=prisma/schema.prisma
+RUN DATABASE_URL="postgresql://localhost:5432/taskora?schema=public" npm run db:generate
 
 COPY src ./src
 
@@ -40,7 +41,7 @@ WORKDIR /app
 
 COPY --from=production-dependencies --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
-COPY --from=development --chown=node:node /app/node_modules/.prisma/client ./node_modules/.prisma/client
+COPY --from=development --chown=node:node /app/build/generated/prisma ./build/generated/prisma
 COPY --from=development --chown=node:node /app/prisma ./prisma
 COPY --from=development --chown=node:node /app/src ./src
 

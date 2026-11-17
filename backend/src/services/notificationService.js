@@ -1,5 +1,10 @@
 const prisma = require("../lib/prisma");
-const { NOTIFICATION_TYPES, isValidNotificationId } = require("../validators/notificationValidators");
+const {
+    NOTIFICATION_TYPES,
+    MAX_PAGE,
+    MAX_LIMIT,
+    isValidNotificationId
+} = require("../validators/notificationValidators");
 
 const TYPE_TO_PRISMA = {
     task_due: "TASK_DUE",
@@ -143,23 +148,76 @@ function toApiNotification(notification) {
 }
 
 function createNotificationService({ prismaClient = prisma, clock = () => new Date() } = {}) {
-    async function createNotification(input, transactionClient = prismaClient) {
-        const data = validateCreateInput(input);
-        if (data.dedupeKey) {
-            const result = await transactionClient.notification.createMany({
-                data: [data],
-                skipDuplicates: true
+    async function assertRelatedResourceOwnership(client, data) {
+        if (data.taskId) {
+            const task = await client.task.findFirst({
+                where: { id: data.taskId, userId: data.userId },
+                select: { id: true }
             });
-            return result.count;
+            if (!task) {
+                throw invalidInput("Notification task must belong to its user");
+            }
         }
 
-        const notification = await transactionClient.notification.create({ data });
-        return toApiNotification(notification);
+        if (data.studyPlanId) {
+            const plan = await client.studyPlan.findFirst({
+                where: { id: data.studyPlanId, userId: data.userId },
+                select: { id: true }
+            });
+            if (!plan) {
+                throw invalidInput("Notification study plan must belong to its user");
+            }
+        }
+
+        if (data.scheduleItemId) {
+            const scheduleItem = await client.scheduleItem.findFirst({
+                where: {
+                    id: data.scheduleItemId,
+                    subject: { is: { plan: { is: { userId: data.userId } } } }
+                },
+                select: { id: true }
+            });
+            if (!scheduleItem) {
+                throw invalidInput("Notification schedule item must belong to its user");
+            }
+        }
+    }
+
+    async function createNotification(input, transactionClient) {
+        const data = validateCreateInput(input);
+
+        const createWithClient = async (client) => {
+            await assertRelatedResourceOwnership(client, data);
+            if (data.dedupeKey) {
+                const result = await client.notification.createMany({
+                    data: [data],
+                    skipDuplicates: true
+                });
+                return result.count;
+            }
+
+            const notification = await client.notification.create({ data });
+            return toApiNotification(notification);
+        };
+
+        return transactionClient
+            ? createWithClient(transactionClient)
+            : prismaClient.$transaction(createWithClient);
     }
 
     async function listNotifications(userId, { type, unreadOnly, page, limit }) {
         if (!isValidNotificationId(userId)) {
             throw invalidInput("Authenticated user ID must be a valid UUID");
+        }
+        if (
+            !Number.isSafeInteger(page) ||
+            page < 1 ||
+            page > MAX_PAGE ||
+            !Number.isSafeInteger(limit) ||
+            limit < 1 ||
+            limit > MAX_LIMIT
+        ) {
+            throw invalidInput("Notification pagination is outside the supported range");
         }
 
         const where = {

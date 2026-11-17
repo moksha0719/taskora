@@ -248,16 +248,45 @@ test("protected /me rejects missing, invalid, and expired JWTs", async () => {
             issuer: JWT_ISSUER,
             subject: "test-user-id"
         });
+        const wrongAlgorithm = jwt.sign({}, TEST_SECRET, {
+            algorithm: "HS384",
+            audience: JWT_AUDIENCE,
+            expiresIn: "1h",
+            issuer: JWT_ISSUER,
+            subject: "test-user-id"
+        });
+        const wrongIssuer = jwt.sign({}, TEST_SECRET, {
+            algorithm: "HS256",
+            audience: JWT_AUDIENCE,
+            expiresIn: "1h",
+            issuer: "unexpected-issuer",
+            subject: "test-user-id"
+        });
+        const wrongAudience = jwt.sign({}, TEST_SECRET, {
+            algorithm: "HS256",
+            audience: "unexpected-audience",
+            expiresIn: "1h",
+            issuer: JWT_ISSUER,
+            subject: "test-user-id"
+        });
 
         const responses = await Promise.all([
             request("/api/auth/me"),
             request("/api/auth/me", { headers: { authorization: "Bearer not-a-token" } }),
-            request("/api/auth/me", { headers: { authorization: `Bearer ${expiredToken}` } })
+            request("/api/auth/me", { headers: { authorization: `Bearer ${expiredToken}` } }),
+            request("/api/auth/me", { headers: { authorization: `Bearer ${wrongAlgorithm}` } }),
+            request("/api/auth/me", { headers: { authorization: `Bearer ${wrongIssuer}` } }),
+            request("/api/auth/me", { headers: { authorization: `Bearer ${wrongAudience}` } })
         ]);
 
-        assert.deepEqual(responses.map((response) => response.status), [401, 401, 401]);
+        assert.deepEqual(responses.map((response) => response.status), [
+            401, 401, 401, 401, 401, 401
+        ]);
         assert.deepEqual(await Promise.all(responses.map((response) => response.json())), [
             { error: "Authentication required" },
+            { error: "Invalid or expired token" },
+            { error: "Invalid or expired token" },
+            { error: "Invalid or expired token" },
             { error: "Invalid or expired token" },
             { error: "Invalid or expired token" }
         ]);

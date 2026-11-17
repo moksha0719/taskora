@@ -14,15 +14,15 @@ The existing frontend describes these screens and interactions:
 |---|---|---|
 | **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Registration and login use the backend JWT API. Password reset is still UI-only. |
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
-| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. An authenticated backend text-response endpoint exists, but proposal generation and approval are not integrated. |
+| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. The backend supports persistent conversations and task proposals with explicit approval/rejection; the frontend flow is not integrated. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, and completion actions/history for saved schedule items. The backend can persist a submitted schedule, but the frontend does not yet save generated previews or activate plans. |
+| **FR-05 Smart Study Planner** | `/study-planner` | Subject workload and weekly timetable UI. The backend supports plan CRUD, deterministic schedule preview/persistence, activation/deactivation, and completion history; the UI is not integrated. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
 | **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
 | **FR-09 Gamification** | `/achievements` | Scholar levels, XP progress, badges, and transaction-style history UI. |
 | **FR-10 Study Workspace** | `/workspace` | Subject-organized notes and editor UI with private-by-default and sharing controls. |
-| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. The backend can process text into proposed tasks, but does not persist entries or tasks. |
+| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. The backend persists Brain Dumps and proposed tasks; tasks are created only after explicit approval. The frontend is not integrated. |
 | **FR-12 Virtual Study Rooms** | `/study-rooms` | Public/private room UI, passcode flow, synchronized timer, participants, and quiet chat. |
 | **FR-13 Notifications** | `/notifications` | Notification center UI for deadline, habit, room, and achievement alerts. |
 | **FR-14 Search and Filter** | `/search` | Search UI for tasks, notes, and habits with filter tabs. |
@@ -51,12 +51,12 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Frontend | React 18, TypeScript, Vite, React Router | Present |
 | Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
 | Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
-| Frontend data layer | Typed API client plus mock APIs and browser `localStorage` | Authentication and Phase 06 study planning use Express; other prototype features remain mocked |
-| Backend | Node.js, Express, CORS, dotenv | Authentication, tasks, AI, Brain Dump, Study Planner, and notification routes are present |
-| Database | PostgreSQL | Configured through the backend Docker Compose setup |
-| ORM | Prisma | Schema and migrations are present |
-| Authentication | Password hashing and JWT | Backend-backed registration and login |
-| AI integration | Gemini API called from the backend | Present; keep provider keys server-side |
+| Frontend data layer | Typed mock API and browser `localStorage` | Present; not connected to Express |
+| Backend | Node.js, Express, CORS, dotenv | Authenticated API routes present |
+| Database | PostgreSQL | Prisma-backed schema and migrations present |
+| ORM | Prisma | Configured in `backend/` |
+| Authentication | bcrypt password hashing and JWT | Backend endpoints present; frontend sign-in remains a demo |
+| AI integration | Google Gemini through the backend | Assistant, persistent conversation/proposal, and Brain Dump endpoints present; frontend proposal flow remains local |
 
 ## Architecture
 
