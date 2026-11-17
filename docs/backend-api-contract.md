@@ -31,6 +31,16 @@ Malformed JSON returns `400` with `{"error":"Invalid JSON payload"}`. Unexpected
 server errors return `500` with `{"error":"Internal server error"}`; internal
 exception or database details are not included in the response.
 
+JSON request bodies are limited to 1 MiB. Oversized JSON returns `413` with
+`{"error":"Request body exceeds the supported size limit"}`; unsupported media
+types on write requests carrying an `Authorization` header and a body return
+`415` with
+`{"error":"Unsupported content type"}`. Responses disable Express
+fingerprinting and include `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+`Permissions-Policy: geolocation=(), microphone=(), camera=()`, and
+`Cross-Origin-Resource-Policy: same-origin`.
+
 ## Health and root
 
 | Method | Path | Auth | Success |
@@ -150,8 +160,9 @@ Create example:
 }
 ```
 
-`title` is required on create and must be a non-empty string; it is trimmed.
-`description` may be a string or `null`. `status` is `TODO`, `IN_PROGRESS`, or
+`title` is required on create and must be a non-empty string; it is trimmed
+and limited to 120 characters. `description` may be `null` or a non-empty,
+non-whitespace string up to 1,000 characters. `status` is `TODO`, `IN_PROGRESS`, or
 `COMPLETED`; `priority` is `LOW`, `MEDIUM`, or `HIGH`. Omitted status and
 priority use the database defaults (`TODO` and `MEDIUM`). `dueDate` may be
 `null`, an ISO `YYYY-MM-DD` date, or an ISO date-time with a timezone offset.
@@ -209,7 +220,8 @@ Success (`200`):
 ```
 
 This endpoint returns assistant text; it does not create a frontend
-`AIProposal`, persist proposed tasks, or provide proposal approval endpoints.
+`AIProposal` or persist messages. Persistent conversations and explicit
+task-proposal approval are available through the conversation endpoints below.
 Validation failures return `400`. Each authenticated user is limited to 10
 requests per 15-minute window (`429` with
 `{"error":"Too many AI requests. Please try again later."}`). The limiter uses
@@ -221,6 +233,57 @@ Validation error examples are `"A JSON object is required"`,
 `"Only the message field is accepted"`,
 `"Message must be a non-empty string"`, and
 `"Message must be 4000 characters or fewer"`.
+
+### Persistent conversations and task proposals
+
+All conversation and proposal endpoints are protected and scoped to the JWT
+owner. Another user's conversation or proposal is reported as `404`.
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `POST` | `/api/ai/conversations` | `201`, `{ "conversation": ... }` |
+| `GET` | `/api/ai/conversations` | `200`, `{ "conversations": [...] }` |
+| `GET` | `/api/ai/conversations/:conversationId` | `200`, `{ "conversation": ... }` |
+| `POST` | `/api/ai/conversations/:conversationId/messages` | `201`, persisted user/assistant messages and proposals |
+| `POST` | `/api/ai/proposals/:proposalId/approve` | `200`, `{ "proposal": ..., "task": ... }` |
+| `POST` | `/api/ai/proposals/:proposalId/reject` | `200`, `{ "proposal": ... }` |
+
+Conversation creation accepts an optional title:
+
+```json
+{ "title": "Exam preparation" }
+```
+
+The title, if supplied, must contain 1–160 non-whitespace characters.
+Conversation creation and proposal approval/rejection share a separate limit
+of 30 writes per authenticated user per 15-minute window; exceeding it returns
+`429` with
+`{"error":"Too many conversation updates. Please try again later."}`.
+Conversation writes use the process's in-memory store, so multiple replicas do
+not share counters.
+
+Sending a message accepts only a non-empty `message` string up to 4,000
+characters:
+
+```json
+{ "message": "Help me prepare for biology." }
+```
+
+The message response contains `conversationId`, a persisted `userMessage`, a
+persisted `assistantMessage`, and `proposals`. Proposals currently support only
+`CREATE_TASK`; each has a UUID `id`, `actionType`, validated task `payload`,
+`status`, `expiresAt`, and creation time. New proposals are `PENDING` and are
+suggestions only; generating one never creates a task. Approval revalidates the
+payload and creates the task in the same transaction that resolves the
+proposal. Rejection does not create a task. Resolved proposals cannot be
+approved or rejected again. Assistant proposals expire 30 days after creation;
+an expired proposal returns `409` and is marked `EXPIRED`.
+
+Message creation uses the same per-user AI request limit as
+`POST /api/ai/assistant`. Invalid messages or IDs return `400`; missing or
+cross-user resources return `404`; expired or already resolved proposals return
+`409`. Provider configuration, timeout, and provider errors use `503`, `504`,
+and `502` respectively.
 
 ## Brain Dump
 
@@ -265,6 +328,30 @@ Validation error examples are `"A JSON object is required"`,
 malformed or violates the described output schema, the endpoint returns
 `502` with `{"error":"AI returned an invalid response"}`.
 
+### Persisted Brain Dumps and task review
+
+The stateless `/process` preview above remains available. Persisted Brain Dump
+workflows use these protected, owner-scoped endpoints:
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `POST` | `/api/brain-dumps` | `201`, `{ "brainDump": ... }` |
+| `GET` | `/api/brain-dumps` | `200`, `{ "brainDumps": [...] }` |
+| `GET` | `/api/brain-dumps/:brainDumpId` | `200`, `{ "brainDump": ... }` |
+| `POST` | `/api/brain-dumps/:brainDumpId/proposals/:proposalId/approve` | `200`, `{ "proposal": ..., "task": ... }` |
+| `POST` | `/api/brain-dumps/:brainDumpId/proposals/:proposalId/reject` | `200`, the updated proposal |
+
+`POST /api/brain-dumps` accepts the same `{ "text": "..." }` body and 8,000
+character limit as `/process`, and shares the same per-user 5-per-15-minute
+Brain Dump limit. It stores the original text, validated summary,
+and validated task proposals. Proposals start as `PENDING`; tasks are created
+only after explicit approval. Approval revalidates title, description,
+priority, and due date, and creates the task transactionally through the task
+service. Rejection and approval are single-use decisions. The list returns at
+most 50 newest records. Missing or cross-user records return `404`; invalid
+inputs return `400`; already resolved proposals return `409`. AI provider and
+output errors retain the safe status mappings documented for `/process`.
+
 ## Study Planner and Notifications
 
 Study Planner endpoints cover plan CRUD, stateless schedule preview, saving a
@@ -301,9 +388,11 @@ frontend, its API client and DTOs need an intentional compatibility update:
   `study_reminder`, `study_plan_updated`, and `system`. The current frontend
   mock exposes list and mark-read methods only; the backend also supports
   pagination, filters, unread count, and deletion.
-- Frontend AI proposal and Brain Dump flows are local mock workflows. Backend
-  assistant and Brain Dump routes return plain assistant text or validated
-  proposed tasks and do not implement proposal approval or persistence.
+- Frontend AI proposal and Brain Dump flows remain local mock workflows and
+  are not connected to these APIs. The backend supports persistent AI
+  conversations, explicit task-proposal approval, and persisted Brain Dump
+  review. The legacy `/api/ai/assistant` and `/api/brain-dumps/process`
+  endpoints remain stateless preview operations.
 
 Do not treat these mismatches as implicit API changes. The frontend integration
 should map deliberately to the documented backend contract or agree on a

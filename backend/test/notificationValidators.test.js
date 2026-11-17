@@ -25,8 +25,14 @@ test("notification list query rejects unknown, repeated, malformed, and out-of-r
         { type: "deadline" },
         { unreadOnly: "yes" },
         { page: "0" },
+        { page: "-1" },
         { page: "1.5" },
+        { page: "not-a-number" },
+        { page: "1001" },
         { page: "9007199254740992" },
+        { limit: "0" },
+        { limit: "1.5" },
+        { limit: "not-a-number" },
         { limit: "101" },
         { limit: ["10", "20"] }
     ];
@@ -34,6 +40,10 @@ test("notification list query rejects unknown, repeated, malformed, and out-of-r
     for (const query of invalidQueries) {
         assert.equal(typeof validateNotificationListQuery(query).error, "string");
     }
+
+    assert.deepEqual(validateNotificationListQuery({ page: "1000", limit: "100" }), {
+        data: { type: undefined, unreadOnly: false, page: 1000, limit: 100 }
+    });
 });
 
 test("notification IDs must use the UUID shape", () => {

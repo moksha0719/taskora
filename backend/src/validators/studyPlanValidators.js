@@ -13,6 +13,10 @@ const DEFAULT_TIME_ZONE = "Asia/Colombo";
 const STUDY_DAYS_PER_WEEK = new Set([4, 5, 6]);
 const MIN_WEEKLY_TARGET_MINUTES = 600;
 const MAX_WEEKLY_TARGET_MINUTES = 2400;
+const MAX_PLAN_TITLE_LENGTH = 120;
+const MAX_SUBJECT_NAME_LENGTH = 120;
+const MAX_SUBJECT_CODE_LENGTH = 32;
+const MAX_SUBJECTS_PER_PLAN = 12;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 function isValidDate(value) {
@@ -83,6 +87,10 @@ function validateStudyPlanCreateInput(body) {
         return { error: "Title must be a non-empty string" };
     }
 
+    if (body.title.trim().length > MAX_PLAN_TITLE_LENGTH) {
+        return { error: `Title must be ${MAX_PLAN_TITLE_LENGTH} characters or fewer` };
+    }
+
     if (!isValidDate(body.startDate)) {
         return { error: "Start date must be a valid YYYY-MM-DD date" };
     }
@@ -116,6 +124,10 @@ function validateStudyPlanCreateInput(body) {
         return { error: "Subjects must be a non-empty array" };
     }
 
+    if (body.subjects.length > MAX_SUBJECTS_PER_PLAN) {
+        return { error: `Subjects must contain ${MAX_SUBJECTS_PER_PLAN} or fewer entries` };
+    }
+
     const subjectNames = new Set();
     let subjectTargetTotal = 0;
     const subjects = [];
@@ -133,6 +145,10 @@ function validateStudyPlanCreateInput(body) {
 
         if (typeof subject.name !== "string" || !subject.name.trim()) {
             return { error: `Subject at index ${index} must have a non-empty name` };
+        }
+
+        if (subject.name.trim().length > MAX_SUBJECT_NAME_LENGTH) {
+            return { error: `Subject at index ${index} name must be ${MAX_SUBJECT_NAME_LENGTH} characters or fewer` };
         }
 
         const name = subject.name.trim();
@@ -157,8 +173,11 @@ function validateStudyPlanCreateInput(body) {
         };
 
         if (Object.hasOwn(subject, "code")) {
-            if (typeof subject.code !== "string") {
-                return { error: `Subject at index ${index} code must be a string` };
+            if (typeof subject.code !== "string" || !subject.code.trim()) {
+                return { error: `Subject at index ${index} code must be a non-empty string` };
+            }
+            if (subject.code.trim().length > MAX_SUBJECT_CODE_LENGTH) {
+                return { error: `Subject at index ${index} code must be ${MAX_SUBJECT_CODE_LENGTH} characters or fewer` };
             }
             validatedSubject.code = subject.code.trim();
         }

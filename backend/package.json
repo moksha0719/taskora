@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "predev": "npm run db:generate",
     "dev": "nodemon src/server.js",
-    "db:generate": "prisma generate",
+    "db:generate": "prisma generate && tsc --project tsconfig.prisma.json",
     "db:validate": "prisma validate",
     "db:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
     "test": "node --test"
@@ -18,16 +18,19 @@
   "type": "commonjs",
   "dependencies": {
     "@google/genai": "^3.3.0",
-    "@prisma/client": "^6.19.0",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.4",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "nodemon": "3.1.11",
-    "prisma": "^6.19.0"
+    "prisma": "7.10.1",
+    "typescript": "5.9.3"
   }
 }

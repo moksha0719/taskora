@@ -75,7 +75,29 @@ npm --prefix backend test
 npm test
 ```
 
-The backend tests use mocked dependencies and do not require a live database.
+The default backend tests use mocked dependencies and do not require a live
+database. The two PostgreSQL integration tests require
+`TASKORA_TEST_DATABASE_URL`; both are skipped when it is not configured. Each
+test accepts only a loopback URL (`127.0.0.1`) whose database name starts with
+`taskora_test_`. Set the variable securely in the test process environment and
+use a fresh, disposable test database, never a development or production
+database. Provision the database and apply the checked-in migrations before
+running either test.
+
+```bash
+# From backend/, with TASKORA_TEST_DATABASE_URL configured:
+node --test test/integration/postgresPersistence.test.js
+node --test test/integration/task3Task4Persistence.test.js
+
+# Or run both integration tests together:
+node --test test/integration/postgresPersistence.test.js test/integration/task3Task4Persistence.test.js
+```
+
+`postgresPersistence.test.js` covers persistence and ownership for users,
+tasks, study plans, schedules, completions, and notifications.
+`task3Task4Persistence.test.js` covers Task 3 and Task 4 persistence, ownership,
+migration structure, and rollback behavior. The tests do not provision or
+migrate the database.
 
 ## Docker development
 
@@ -185,6 +207,50 @@ at `POST /api/study-plans/generate` returns a preview and does not save it.
 Persisting the schedule is a separate
 `PUT /api/study-plans/:id/schedule` operation.
 
+### Request validation and protection
+
+JSON request bodies are limited to 1 MiB. Malformed JSON returns `400`,
+oversized bodies return `413`. A write request carrying an Authorization
+header and a body must use `application/json`; missing or unsupported content
+types return `415`. API errors use a generic JSON error object and do not
+include stack traces or database/provider details. Responses include
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and
+`Cross-Origin-Resource-Policy: same-origin`; Express's `X-Powered-By` header
+is disabled.
+
+Task titles are limited to 120 characters and non-null descriptions to 1,000
+characters; supplied text cannot be blank. Study-plan titles and subject names
+are limited to 120 characters, supplied subject codes to 32 non-empty
+characters, and each plan to 12 subjects. Detailed rules are in the API
+contracts.
+
+Notification history accepts pages 1–1,000 and limits 1–100 (default 20),
+which bounds the maximum database offset to 99,900. Study-session completion
+history accepts date ranges up to 365 days (`from` inclusive, `to` exclusive)
+and returns at most 100 records per page by default. Its page is limited to
+1–1,300 and its page size to 1–100.
+
+Rate limits are per IP for registration/login (10 requests per 15 minutes),
+and per authenticated user for AI Assistant/conversation messages (10 per
+15 minutes), Brain Dump processing/creation (5 per 15 minutes), and conversation
+creation/proposal decisions (30 combined per 15 minutes). These use the
+express-rate-limit in-memory store: counts are per backend process and reset
+when it restarts; replicas do not share counters. Express does not trust
+forwarded IP headers by default, so place a correctly configured trusted proxy
+in front of the API if client-IP rate limiting is needed behind a proxy. Rate
+limiting is not a substitute for authentication or authorization.
+
+Notifications that reference a task, study plan, or schedule item are checked
+against the notification owner's records inside the same transaction used to
+write the notification. `SYSTEM` notifications without related records remain
+supported for trusted internal callers.
+
+Deleting an owned `DRAFT` or `ARCHIVED` study plan is allowed only when it has
+no completed sessions. If completion history exists, deletion returns `409`
+and leaves the plan and its history intact. Activation/deactivation retains
+the plan, schedule, and completion records.
+
 The notification scheduler checks due tasks within the next 24 hours and
 persisted study sessions 15 minutes before their start. It runs once per minute
 and uses database deduplication. It does not recover task or study reminders
@@ -214,11 +280,9 @@ that have become overdue while the scheduler was down.
   schema; `npm run db:deploy` applies pending migrations. Do not use reset or
   schema-push commands against production. Check migration history and backups
   before a production rollout.
-- **Dependency audit notices:** The latest Docker build reported 3 high
-  severity findings in the production dependency install, and 5 findings in
-  the development install (2 moderate and 3 high). These warnings have not
-  been resolved as part of this documentation update; rerun an audit to refresh
-  the findings.
+- **Dependency audit:** Run `npm audit` and `npm audit --omit=dev` from
+  `backend/` before releases. Audit results apply to the checked-in dependency
+  lockfile and should be refreshed when dependencies change.
 
 Production deployment has not been tested against a production server or
 database.

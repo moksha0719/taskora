@@ -20,8 +20,8 @@ function tokenFor(userId = TEST_USER_ID) {
     });
 }
 
-async function withServer(aiService, run) {
-    const server = createApp({ aiService }).listen(0);
+async function withServer(aiService, run, aiConversationService) {
+    const server = createApp({ aiService, aiConversationService }).listen(0);
     await once(server, "listening");
     const address = server.address();
     const request = (path, options = {}) => fetch(`http://127.0.0.1:${address.port}${path}`, options);
@@ -190,4 +190,40 @@ test("assistant endpoint rate limits authenticated users", async () => {
         assert.equal(responses[10].status, 429);
         assert.equal(calls, 10);
     });
+});
+
+test("conversation database writes have a separate per-user limit", async () => {
+    let creates = 0;
+    const conversationService = {
+        createConversation: async (userId) => {
+            creates += 1;
+            return { id: `conversation-${userId}` };
+        }
+    };
+
+    await withServer(mockedGeminiService(async () => ({ text: "Unused" })), async (request) => {
+        const createRequest = (userId = TEST_USER_ID) => request("/api/ai/conversations", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${tokenFor(userId)}`
+            },
+            body: JSON.stringify({ title: "Exam preparation" })
+        });
+
+        const responses = [];
+        for (let attempt = 0; attempt < 31; attempt += 1) {
+            responses.push(await createRequest());
+        }
+
+        assert.equal(responses.slice(0, 30).every((response) => response.status === 201), true);
+        assert.equal(responses[30].status, 429);
+        assert.deepEqual(await responses[30].json(), {
+            error: "Too many conversation updates. Please try again later."
+        });
+
+        const otherUserResponse = await createRequest("44444444-4444-4444-8444-444444444444");
+        assert.equal(otherUserResponse.status, 201);
+        assert.equal(creates, 31);
+    }, conversationService);
 });
