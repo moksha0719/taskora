@@ -1,11 +1,25 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Navigate, Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { X } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export const AppShell: React.FC = () => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const { user, loading, authError } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-dream-bg dark:bg-[#130E26] text-sm text-muted-purple">
+        Checking your session...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace state={{ message: authError }} />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-dream-bg dark:bg-[#130E26]">
