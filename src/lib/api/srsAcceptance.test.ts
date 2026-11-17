@@ -3,6 +3,7 @@ import {
   studyPlansApi, brainDumpApi, gamificationApi, 
   roomsApi, themeApi, dashboardApi 
 } from './client';
+import type { StudyDayCode } from '../../types';
 
 export async function runSRSVerificationTests() {
   console.log('====================================================');
@@ -24,8 +25,11 @@ export async function runSRSVerificationTests() {
 
   try {
     // TC01: Register with valid details
-    const newUser = await authApi.register('Test Scholar', 'test.scholar@university.edu');
-    assert('TC01', 'Register with valid details', !!newUser.id && newUser.email === 'test.scholar@university.edu');
+    const testEmail = 'test.scholar@university.edu';
+    const testPassword = 'TestPassword123!';
+    const registrationMessage = await authApi.register('Test Scholar', testEmail, testPassword);
+    const newUser = await authApi.login(testEmail, testPassword);
+    assert('TC01', 'Register and sign in with valid details', !!registrationMessage && !!newUser.id);
 
     // TC02: Create and edit a task
     const newTask = await tasksApi.createTask({
@@ -60,9 +64,55 @@ export async function runSRSVerificationTests() {
     const updatedHabit = await habitsApi.toggleHabit(habitToToggle.id, today);
     assert('TC06', 'Complete a habit', updatedHabit.logs[today] === true);
 
-    // TC07: Create study plan
-    const generatedPlan = await studyPlansApi.generateSmartSchedule(['Operating Systems', 'Algorithms'], 20);
-    assert('TC07', 'Create study plan', generatedPlan.subjects.length === 2 && generatedPlan.sessions.length > 0);
+    // TC07: Create a plan and preview a schedule using explicit availability
+    const formatDate = (date: Date) => (
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    );
+    const startDate = new Date();
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 30);
+    const studyDays: StudyDayCode[] = ['MON', 'TUE', 'WED', 'THU'];
+    const studyPlan = await studyPlansApi.createPlan({
+      title: 'Acceptance study plan',
+      startDate: formatDate(startDate),
+      endDate: formatDate(endDate),
+      timeZone: 'Asia/Colombo',
+      weeklyTargetMinutes: 600,
+      studyDaysPerWeek: 4,
+      subjects: [{
+        name: 'Operating Systems',
+        code: 'OS',
+        targetMinutesPerWeek: 600,
+      }],
+    });
+    try {
+      const generatedSchedule = await studyPlansApi.generateSchedule({
+        plan: {
+          weeklyTargetMinutes: studyPlan.weeklyTargetMinutes,
+          studyDaysPerWeek: studyPlan.studyDaysPerWeek,
+        },
+        subjects: studyPlan.subjects.map(({ id, name, targetMinutesPerWeek }) => ({
+          id,
+          name,
+          targetMinutesPerWeek,
+        })),
+        studyDays,
+        scheduleSettings: {
+          availabilityWindows: studyDays.map((dayOfWeek) => ({
+            dayOfWeek,
+            startMinuteOfDay: 540,
+            endMinuteOfDay: 690,
+          })),
+        },
+      });
+      assert(
+        'TC07',
+        'Create a backend study plan and generate an availability-based preview',
+        !!studyPlan.id && generatedSchedule.length > 0
+      );
+    } finally {
+      await studyPlansApi.deletePlan(studyPlan.id);
+    }
 
     // TC08: Capture Brain Dump
     const dumpEntry = await brainDumpApi.addEntry('Need to print project slides and verify API contracts');

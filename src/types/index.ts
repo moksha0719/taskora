@@ -71,6 +71,94 @@ export interface StudyPlan {
   createdAt: string;
 }
 
+export type StudyPlanStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+export type StudyDayCode = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN';
+
+export interface StudyScheduleItem {
+  id: string;
+  subjectId: string;
+  dayOfWeek: StudyDayCode;
+  startMinuteOfDay: number;
+  durationMinutes: number;
+  kind: 'STUDY' | 'REVIEW';
+  topics: string[];
+}
+
+export interface StudyPlanSubject {
+  id: string;
+  planId: string;
+  name: string;
+  code: string;
+  color: string;
+  targetMinutesPerWeek: number;
+  scheduleItems?: StudyScheduleItem[];
+}
+
+export interface ApiStudyPlan {
+  id: string;
+  userId: string;
+  activeUserId: string | null;
+  title: string;
+  status: StudyPlanStatus;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  weeklyTargetMinutes: number;
+  studyDaysPerWeek: number;
+  createdAt: string;
+  updatedAt: string;
+  subjects: StudyPlanSubject[];
+}
+
+export interface StudyPlanSubjectInput {
+  name: string;
+  code?: string;
+  color?: string;
+  targetMinutesPerWeek: number;
+}
+
+export interface StudyPlanInput {
+  title: string;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  weeklyTargetMinutes: number;
+  studyDaysPerWeek: number;
+  subjects: StudyPlanSubjectInput[];
+}
+
+export interface StudyAvailabilityWindow {
+  dayOfWeek: StudyDayCode;
+  startMinuteOfDay: number;
+  endMinuteOfDay: number;
+}
+
+export interface StudySchedulePreviewItem {
+  subjectId: string;
+  subjectName: string;
+  dayOfWeek: StudyDayCode;
+  startMinuteOfDay: number;
+  durationMinutes: number;
+  kind: 'STUDY';
+}
+
+export interface StudySchedulePreviewInput {
+  plan: Pick<ApiStudyPlan, 'weeklyTargetMinutes' | 'studyDaysPerWeek'>;
+  subjects: Array<Pick<StudyPlanSubject, 'id' | 'name' | 'targetMinutesPerWeek'>>;
+  studyDays: StudyDayCode[];
+  scheduleSettings: {
+    availabilityWindows: StudyAvailabilityWindow[];
+  };
+}
+
+export interface StudyCompletion {
+  id: string;
+  scheduleItemId: string;
+  occurrenceDate: string;
+  completedAt: string;
+  actualDurationMinutes: number | null;
+}
+
 export type ProposalType = 
   | 'task_breakdown' 
   | 'study_schedule' 

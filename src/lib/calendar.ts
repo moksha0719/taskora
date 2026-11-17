@@ -1,4 +1,4 @@
-import { StudyPlan, Task } from '../types';
+import { ApiStudyPlan, Task } from '../types';
 
 export interface CalendarEvent {
   id: string;
@@ -10,7 +10,7 @@ export interface CalendarEvent {
   details?: string;
 }
 
-const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEKDAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
 
 export function toDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -40,7 +40,7 @@ export function getCalendarGridDates(month: Date, weekStartsOn = 0): Date[] {
 
 export function getCalendarEvents(
   tasks: Task[],
-  plan: StudyPlan | null,
+  plans: ApiStudyPlan[],
   start: Date,
   endExclusive: Date
 ): CalendarEvent[] {
@@ -57,35 +57,39 @@ export function getCalendarEvents(
       details: task.description,
     }));
 
-  if (!plan) return taskEvents;
-
-  const planStart = parseDateKey(plan.startDate);
-  const planEnd = parseDateKey(plan.endDate);
-  if (!planStart || !planEnd) return taskEvents;
-
-  const planStartKey = toDateKey(planStart);
-  const planEndKey = toDateKey(planEnd);
   const studyEvents: CalendarEvent[] = [];
 
   for (let date = start; toDateKey(date) < endKey; date = addCalendarDays(date, 1)) {
     const dateKey = toDateKey(date);
-    if (dateKey < planStartKey || dateKey > planEndKey) continue;
+    const dayOfWeek = WEEKDAY_CODES[date.getDay()];
 
-    for (const session of plan.sessions) {
-      if (session.day !== WEEKDAY_NAMES[date.getDay()]) continue;
-      studyEvents.push({
-        id: `study-${session.id}-${dateKey}`,
-        title: session.subjectName,
-        date: dateKey,
-        type: 'study',
-        time: session.startTime,
-        endTime: session.endTime,
-        details: session.topics.join(', '),
-      });
+    for (const plan of plans) {
+      if (dateKey < plan.startDate.slice(0, 10) || dateKey > plan.endDate.slice(0, 10)) continue;
+
+      for (const subject of plan.subjects) {
+        for (const item of subject.scheduleItems || []) {
+          if (item.dayOfWeek !== dayOfWeek) continue;
+          studyEvents.push({
+            id: `study-${plan.id}-${item.id}-${dateKey}`,
+            title: subject.name,
+            date: dateKey,
+            type: 'study',
+            time: formatCalendarTime(item.startMinuteOfDay),
+            endTime: formatCalendarTime(item.startMinuteOfDay + item.durationMinutes),
+            details: [plan.title, ...item.topics].join(' · '),
+          });
+        }
+      }
     }
   }
 
   return [...taskEvents, ...studyEvents];
+}
+
+function formatCalendarTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 }
 
 export function groupCalendarEvents(events: CalendarEvent[]): Map<string, CalendarEvent[]> {

@@ -4,7 +4,7 @@
 
 Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-> **Project status:** The frontend is an interactive prototype. Its typed API layer currently uses browser `localStorage` and mock data. The Express backend is an initial starter with a single `GET /` route. PostgreSQL, Prisma, JWT authentication, feature APIs, and server-side AI integration are planned, not implemented. The feature descriptions below preserve the existing product scope; they should not be read as proof that every scenario has been tested or that data is backed by a server.
+> **Project status:** Phase 06 authentication and study-planning APIs are implemented, and the frontend uses them for registration, login, plan CRUD, schedule previews, and schedule completions. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Schedule previews cannot yet be saved or activated, and plan reads do not return completion records.
 
 ## Current features and prototype scope
 
@@ -12,11 +12,11 @@ The existing frontend describes these screens and interactions:
 
 | Requirement | Route | Frontend scope |
 |---|---|---|
-| **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Form validation, password-strength display, and demo Student/Admin switcher. This is not server authentication. |
+| **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Registration and login use the backend JWT API. Password reset is still UI-only. |
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
 | **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. Server-side AI and persistent approval are planned. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner` | Subject workload, weekly targets, and conflict-free AI timetable UI. A real schedule service is planned. |
+| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, and completion actions for saved schedule items. The API does not currently save previews, activate plans, or return existing completion records; completion status is temporarily cached in the browser. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
 | **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
@@ -51,29 +51,29 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Frontend | React 18, TypeScript, Vite, React Router | Present |
 | Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
 | Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
-| Frontend data layer | Typed mock API and browser `localStorage` | Present; not connected to Express |
-| Backend | Node.js, Express, CORS, dotenv | Starter server present |
-| Database | PostgreSQL | Planned; no schema or database connection yet |
-| ORM | Prisma | Planned; not configured yet |
-| Authentication | Password hashing and JWT | Planned; current sign-in is a frontend demo |
-| AI integration | Provider API called from the backend | Planned; keep provider keys server-side |
+| Frontend data layer | Typed API client plus mock APIs and browser `localStorage` | Authentication and Phase 06 study planning use Express; other prototype features remain mocked |
+| Backend | Node.js, Express, CORS, dotenv | Authentication, tasks, AI, Brain Dump, and study-planning routes are present |
+| Database | PostgreSQL | Configured through the backend Docker Compose setup |
+| ORM | Prisma | Schema and migrations are present |
+| Authentication | Password hashing and JWT | Backend-backed registration and login |
+| AI integration | Gemini API called from the backend | Present; keep provider keys server-side |
 
 ## Architecture
 
 ### Current implementation
 
 1. The browser runs the React application using Vite.
-2. Pages call the typed API functions in `src/lib/api/client.ts`.
-3. Those functions use mock data, simulated delays, and browser `localStorage`.
-4. The Express server in `backend/src/server.js` has JSON parsing, permissive CORS, and a basic `GET /` response. The frontend does not currently call it.
+2. Authentication, Study Planner, CalendarPage, and the dashboard semester calendar call the typed API client in `src/lib/api/client.ts`, which sends the JWT to the Express API.
+3. Other prototype features still use mock data, simulated delays, and browser `localStorage`.
+4. The Express server exposes authentication and feature routes backed by Prisma and PostgreSQL.
 
 ### Planned architecture
 
-The intended production data flow is:
+The data flow is in use for authentication and study planning; other features are still prototypes:
 
 `React UI → typed frontend API client → Express routes/controllers/services → Prisma → PostgreSQL`
 
-Authentication, authorization, input validation, and AI provider calls will be handled server-side. The frontend should never contain database credentials, JWT signing secrets, or AI provider keys. See [BACKEND_PLAN.md](./BACKEND_PLAN.md) for milestones and checks.
+Authentication, authorization, input validation, and AI provider calls are handled server-side. The frontend should never contain database credentials, JWT signing secrets, or AI provider keys. See [BACKEND_PLAN.md](./BACKEND_PLAN.md) for remaining milestones and checks.
 
 ## Project structure
 
@@ -81,7 +81,7 @@ Authentication, authorization, input validation, and AI provider calls will be h
 taskora/
 ├── backend/
 │   ├── src/
-│   │   └── server.js             # Express starter; currently only GET /
+│   │   └── server.js             # Express API server
 │   ├── package.json
 │   ├── package-lock.json
 │   └── .env                      # Local only; do not commit
@@ -94,16 +94,16 @@ taskora/
 │   │   ├── dashboard/            # Dashboard widgets
 │   │   ├── layout/               # App shell, sidebar, top bar
 │   │   └── theme/                # Theme preview and contrast UI
-│   ├── context/                  # Authentication-demo and theme contexts
+│   ├── context/                  # JWT authentication and theme contexts
 │   ├── lib/
-│   │   ├── api/                  # Typed mock API and its acceptance test
+│   │   ├── api/                  # Typed backend client and remaining mock APIs
 │   │   └── mockData.ts
 │   ├── pages/                    # App routes and page components
 │   ├── styles/                   # Global CSS and design tokens
 │   ├── types/                    # Shared TypeScript types
 │   ├── App.tsx
 │   └── main.tsx
-├── .env.example                  # Root reference for frontend and planned settings
+├── .env.example                  # Frontend API URL and local settings reference
 ├── package.json
 ├── package-lock.json
 ├── vite.config.ts
@@ -118,7 +118,7 @@ taskora/
 
 - Node.js 18+ (or a compatible current LTS release)
 - npm
-- PostgreSQL is needed for the planned database work; the current frontend prototype and starter `GET /` route do not require a database.
+- Docker Compose is used for the local backend and PostgreSQL services. Study Planner and authentication API calls require the backend and database to be running.
 
 ## Installation and setup
 
@@ -139,17 +139,17 @@ These install the dependencies declared by the respective package manifests. The
 
 ## Environment variables
 
-The root [.env.example](./.env.example) is a reference file containing frontend settings and placeholders for planned backend settings. It is not a backend configuration template. Do not copy real credentials into source control, and do not paste secret values into this README.
+The root [.env.example](./.env.example) contains frontend settings. Backend secrets and database settings belong in `backend/.env`, based on [backend/.env.example](./backend/.env.example). Do not commit `.env` files or paste secret values into this README.
 
 ### Frontend
 
 Create a root `.env` for local Vite settings as needed. The existing example names `VITE_HOST`, `VITE_PORT`, and `VITE_API_BASE_URL`. Variables prefixed with `VITE_` are intended for frontend use and may be included in browser code; **never put secrets in them**.
 
-The frontend currently continues to use its mock API and local storage. Setting an API URL alone does not connect it to the backend.
+Authentication and Study Planner requests use this API base URL. Other prototype features still use mock APIs and local storage.
 
 ### Backend
 
-The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. When running the backend commands below from `backend/`, create `backend/.env` for local settings. For the starter server, `PORT` is optional and defaults to `5000`. Future database, JWT, and AI features will need server-only variables such as:
+The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. Create `backend/.env` from the backend example before starting the API. `PORT` defaults to `5000`; database, JWT, and AI settings are server-only:
 
 ```dotenv
 PORT=5000
@@ -189,7 +189,7 @@ cd backend
 npm run dev
 ```
 
-This runs the starter server with nodemon, normally at `http://localhost:5000`. To run without nodemon:
+This runs the API server with nodemon, normally at `http://localhost:5000`. The database must be available and migrations applied. To run without nodemon:
 
 ```bash
 npm start
@@ -199,14 +199,13 @@ At this stage the server only returns a status message from `GET /`; it does not
 
 ## PostgreSQL and Prisma setup
 
-PostgreSQL and Prisma are part of the planned stack but are **not configured in the current backend**. There is no Prisma dependency, schema, migration, or database client yet.
+PostgreSQL and Prisma are configured in the backend. The schema and migrations are under `backend/prisma`, and `backend/docker-compose.yml` defines the local PostgreSQL and API services.
 
 For local preparation:
 
-1. Install and start PostgreSQL using the instructions for your operating system.
-2. Create a development database, for example by connecting with `psql` and running `CREATE DATABASE taskora;`.
-3. Add a local `DATABASE_URL` to `backend/.env`, using the placeholder format shown above and your own local PostgreSQL username/password.
-4. Follow the PostgreSQL/Prisma setup milestone in [BACKEND_PLAN.md](./BACKEND_PLAN.md) before running Prisma commands. Commands such as `prisma migrate dev` are not available until Prisma is installed and configured.
+1. Copy `backend/.env.example` to `backend/.env` and set unique local PostgreSQL and JWT values.
+2. Start the services with the backend Docker Compose configuration.
+3. Apply the checked-in migrations before using the API.
 
 Use a separate database for tests and production. Never put real database credentials in source files or commit them.
 
@@ -214,31 +213,36 @@ Use a separate database for tests and production. Never put real database creden
 
 ### Currently implemented
 
-The Express server's only route is:
+The backend exposes these API areas:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/` | Returns a JSON message indicating the starter server is running. |
+| `GET` | `/` | Backend health response. |
+| `POST` | `/api/auth/register` | Register an account. |
+| `POST` | `/api/auth/login` | Sign in and receive a JWT. |
+| `GET` | `/api/auth/me` | Resolve the authenticated user. |
+| `*` | `/api/study-plans/*` | Study-plan CRUD, schedule preview, and completion operations; see [Phase 06 API contract](./docs/phase06-api-contract.md). |
+| `*` | `/api/tasks/*`, `/api/ai/*`, `/api/brain-dumps/*` | Task, AI, and Brain Dump APIs. |
 
-Local base URL: `http://localhost:5000`. There are no task, authentication, planner, notification, or AI API endpoints yet. The frontend currently uses the mock API described above.
+Local base URL: `http://localhost:5000`. The frontend API base URL is configured with `VITE_API_BASE_URL`.
 
 ### Planned API areas
 
-The backend roadmap will define and implement API contracts incrementally, beginning with registration/login and task CRUD, then Brain Dump/AI, study planning, and notifications. Request and response schemas, authentication requirements, error formats, and endpoint examples should be documented alongside each implemented API; do not treat planned routes as available endpoints.
+Additional API areas, including notifications, remain on the roadmap. Request and response schemas, authentication requirements, error formats, and endpoint examples should be documented alongside each implemented API; do not treat planned routes as available endpoints.
 
 ## Testing and acceptance scenarios
 
-The root package currently defines `npm run build`; it does not define a test script. `src/lib/api/srsAcceptance.test.ts` is present, but the README does not claim that all acceptance scenarios have been run. The backend currently has no test suite.
+The root package defines `npm run build`; the backend package defines `npm test`. `src/lib/api/srsAcceptance.test.ts` is a manual prototype acceptance routine, not an automated frontend test suite. Do not treat its scenarios as proof of end-to-end coverage.
 
 The original README listed the following SRS acceptance scenarios. They are retained as product checks, **not as a claim that they have all been run or that the backend supports them**. Add frontend, API, and database tests as those layers are implemented.
 
-- **TC01 Registration and login:** register with valid credentials, evaluate password strength, and persist the demo session.
+- **TC01 Registration and login:** register with valid credentials, evaluate password strength, and authenticate against the backend.
 - **TC02 Task CRUD:** create, complete, edit, filter, and delete tasks; completion may trigger confetti.
 - **TC03 AI task request:** turn a natural-language request into a structured proposal.
 - **TC04 Approve AI proposal:** only save a proposed action after explicit approval.
 - **TC05 Focus mode:** run a configurable timer, record a session, and award XP.
 - **TC06 Habit check-in:** update a daily streak while retaining historical check-ins.
-- **TC07 Study plan:** distribute weekly study hours across subjects.
+- **TC07 Study plan:** create a plan, generate a preview from explicit availability windows, and test saved-item completion endpoints.
 - **TC08 Brain Dump:** capture unstructured text and propose an organized result.
 - **TC09 Gamification:** attribute XP to its source and avoid duplicate awards.
 - **TC10 Study rooms:** validate a private-room passcode before joining.

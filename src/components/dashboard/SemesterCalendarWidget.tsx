@@ -11,7 +11,7 @@ import {
   groupCalendarEvents,
   toDateKey,
 } from '../../lib/calendar';
-import { StudyPlan, Task } from '../../types';
+import { ApiStudyPlan, Task } from '../../types';
 
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
@@ -26,18 +26,21 @@ export const SemesterCalendarWidget: React.FC = () => {
   });
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
+  const [studyPlans, setStudyPlans] = useState<ApiStudyPlan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
 
-    Promise.all([tasksApi.getTasks(), studyPlansApi.getPlan()])
-      .then(([loadedTasks, loadedPlan]) => {
+    setIsLoading(true);
+    setLoadError(null);
+    Promise.all([tasksApi.getTasks(), studyPlansApi.getCalendarPlans()])
+      .then(([loadedTasks, loadedPlans]) => {
         if (!active) return;
         setTasks(loadedTasks);
-        setStudyPlan(loadedPlan);
+        setStudyPlans(loadedPlans);
       })
       .catch((error: unknown) => {
         if (active) setLoadError(getErrorMessage(error));
@@ -49,7 +52,7 @@ export const SemesterCalendarWidget: React.FC = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const cells = useMemo(
     () => getCalendarGridDates(currentMonth),
@@ -58,8 +61,8 @@ export const SemesterCalendarWidget: React.FC = () => {
   const gridStart = cells[0];
   const gridEnd = addCalendarDays(gridStart, cells.length);
   const events = useMemo(
-    () => getCalendarEvents(tasks, studyPlan, gridStart, gridEnd),
-    [tasks, studyPlan, gridStart, gridEnd]
+    () => getCalendarEvents(tasks, studyPlans, gridStart, gridEnd),
+    [tasks, studyPlans, gridStart, gridEnd]
   );
   const eventsByDate = useMemo(() => groupCalendarEvents(events), [events]);
 
@@ -209,22 +212,46 @@ export const SemesterCalendarWidget: React.FC = () => {
           </Link>
         </div>
 
-        <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-purple font-medium">
-          <span>
-            {isLoading
-              ? 'Loading events...'
-              : loadError
-                ? loadError
-                : `${selectedDayEvents.length} ${selectedDayEvents.length === 1 ? 'event' : 'events'}`}
-          </span>
-          <div className="flex items-center gap-2.5 shrink-0">
+        <div className="mt-2 space-y-1 text-[10px] text-muted-purple font-medium">
+          {isLoading && <p role="status">Loading your tasks and study schedules...</p>}
+          {loadError && (
+            <div className="flex items-center justify-between gap-2 text-rose-500" role="alert">
+              <span className="truncate">{loadError}</span>
+              <button
+                type="button"
+                onClick={() => setReloadKey((key) => key + 1)}
+                className="shrink-0 font-bold text-primary hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {!isLoading && !loadError && selectedDayEvents.length === 0 && (
+            <p>
+              {studyPlans.length === 0 && tasks.length === 0
+                ? 'No study plans or tasks yet.'
+                : 'No events scheduled for this day.'}
+            </p>
+          )}
+          {!isLoading && !loadError && selectedDayEvents.slice(0, 3).map((event) => (
+            <p key={event.id} className="truncate">
+              <span className={event.type === 'study' ? 'text-orange-500' : 'text-primary'}>
+                {event.time ? `${event.time} ` : ''}
+              </span>
+              {event.title}
+            </p>
+          ))}
+          {!isLoading && !loadError && selectedDayEvents.length > 3 && (
+            <p>+{selectedDayEvents.length - 3} more events</p>
+          )}
+          <div className="flex items-center gap-2.5 pt-1">
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]" />
               Tasks
             </span>
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[#F97316]" />
-              Study
+              Study · Asia/Colombo
             </span>
           </div>
         </div>
