@@ -90,19 +90,21 @@ test("lists owned plan completions with inclusive from and exclusive to dates", 
                     return records.filter((record) =>
                         record.occurrenceDate >= gte && record.occurrenceDate < lt
                     );
-                }
+                },
+                count: async () => 2
             }
         }
     });
 
-    const completions = await service.listScheduleCompletions(
+    const result = await service.listScheduleCompletions(
         USER_ID,
         PLAN_ID,
         "2026-11-16",
         "2026-11-18"
     );
 
-    assert.deepEqual(completions.map(({ id }) => id), ["from", "before-to"]);
+    assert.deepEqual(result.completions.map(({ id }) => id), ["from", "before-to"]);
+    assert.deepEqual(result.pagination, { page: 1, limit: 100, total: 2, totalPages: 1 });
     assert.deepEqual(planQuery.where, { id: PLAN_ID, userId: USER_ID });
     assert.deepEqual(completionQuery.where.occurrenceDate, {
         gte: new Date("2026-11-16T00:00:00.000Z"),
@@ -122,6 +124,8 @@ test("lists owned plan completions with inclusive from and exclusive to dates", 
         { occurrenceDate: "asc" },
         { scheduleItemId: "asc" }
     ]);
+    assert.equal(completionQuery.skip, 0);
+    assert.equal(completionQuery.take, 100);
 });
 
 test("does not query completions for a plan not owned by the caller", async () => {
@@ -138,7 +142,8 @@ test("does not query completions for a plan not owned by the caller", async () =
                 findMany: async () => {
                     completionQueries += 1;
                     return [];
-                }
+                },
+                count: async () => 0
             }
         }
     });
@@ -155,17 +160,23 @@ test("returns an empty list when no completions match", async () => {
     const service = createScheduleCompletionService({
         prismaClient: {
             studyPlan: { findFirst: async () => ({ id: PLAN_ID }) },
-            sessionCompletion: { findMany: async () => [] }
+            sessionCompletion: {
+                findMany: async () => [],
+                count: async () => 0
+            }
         }
     });
 
     assert.deepEqual(
         await service.listScheduleCompletions(USER_ID, PLAN_ID, "2026-11-16", "2026-11-18"),
-        []
+        {
+            completions: [],
+            pagination: { page: 1, limit: 100, total: 0, totalPages: 0 }
+        }
     );
 });
 
-test("rejects malformed or non-increasing completion date ranges before querying", async () => {
+test("rejects malformed, non-increasing, and overly broad completion date ranges before querying", async () => {
     let queries = 0;
     const service = createScheduleCompletionService({
         prismaClient: {
@@ -179,7 +190,8 @@ test("rejects malformed or non-increasing completion date ranges before querying
                 findMany: async () => {
                     queries += 1;
                     return [];
-                }
+                },
+                count: async () => 0
             }
         }
     });
@@ -199,7 +211,64 @@ test("rejects malformed or non-increasing completion date ranges before querying
         "INVALID_INPUT",
         400
     );
+    await serviceError(
+        service.listScheduleCompletions(USER_ID, PLAN_ID, "2025-01-01", "2026-01-02"),
+        "INVALID_INPUT",
+        400,
+        /365 days or fewer/
+    );
     assert.equal(queries, 0);
+});
+
+test("accepts the maximum completion range and bounds history pagination", async () => {
+    let completionQuery;
+    const service = createScheduleCompletionService({
+        prismaClient: {
+            studyPlan: { findFirst: async () => ({ id: PLAN_ID }) },
+            sessionCompletion: {
+                findMany: async (args) => {
+                    completionQuery = args;
+                    return [];
+                },
+                count: async () => 0
+            }
+        }
+    });
+
+    const result = await service.listScheduleCompletions(
+        USER_ID,
+        PLAN_ID,
+        "2026-01-01",
+        "2027-01-01",
+        { page: "1300", limit: "100" }
+    );
+
+    assert.deepEqual(result.pagination, { page: 1300, limit: 100, total: 0, totalPages: 0 });
+    assert.equal(completionQuery.skip, 129900);
+    assert.equal(completionQuery.take, 100);
+
+    await serviceError(
+        service.listScheduleCompletions(
+            USER_ID,
+            PLAN_ID,
+            "2026-01-01",
+            "2027-01-01",
+            { page: "1301", limit: "100" }
+        ),
+        "INVALID_INPUT",
+        400
+    );
+    await serviceError(
+        service.listScheduleCompletions(
+            USER_ID,
+            PLAN_ID,
+            "2026-01-01",
+            "2027-01-01",
+            { page: "1", limit: "101" }
+        ),
+        "INVALID_INPUT",
+        400
+    );
 });
 
 test("creates a completion transactionally for an owned schedule item", async () => {

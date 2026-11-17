@@ -4,6 +4,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const COMPLETION_FIELDS = new Set(["occurrenceDate", "actualDurationMinutes"]);
 const MAX_PRISMA_INT = 2147483647;
+const MAX_COMPLETION_RANGE_DAYS = 365;
+const MAX_COMPLETION_PAGE = 1300;
+const MAX_COMPLETION_LIMIT = 100;
+const DEFAULT_COMPLETION_LIMIT = 100;
 
 class ScheduleCompletionServiceError extends Error {
     constructor(message, code, status) {
@@ -88,6 +92,25 @@ function validateOccurrenceDate(value) {
     return new Date(`${value}T00:00:00.000Z`);
 }
 
+function parsePaginationValue(value, label, defaultValue, maximum) {
+    if (value === undefined) {
+        return defaultValue;
+    }
+
+    if (
+        (typeof value !== "string" && typeof value !== "number") ||
+        !/^[1-9]\d*$/.test(String(value))
+    ) {
+        throw validationError(`${label} must be a positive integer`);
+    }
+
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed > maximum) {
+        throw validationError(`${label} is outside the supported range`);
+    }
+    return parsed;
+}
+
 function validateCompletionInput(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
         throw validationError("A completion input object is required");
@@ -161,13 +184,31 @@ async function assertPlanAndScheduleItemOwnership(
 }
 
 function createScheduleCompletionService({ prismaClient = prisma } = {}) {
-    async function listScheduleCompletions(userId, planId, from, to) {
+    async function listScheduleCompletions(userId, planId, from, to, pagination = {}) {
         assertUuid(userId, "Authenticated user ID");
         assertUuid(planId, "Study plan ID");
+        if (!pagination || typeof pagination !== "object" || Array.isArray(pagination)) {
+            throw validationError("Completion pagination must be an object");
+        }
         const fromDate = validateOccurrenceDate(from);
         const toDate = validateOccurrenceDate(to);
+        const page = parsePaginationValue(pagination.page, "page", 1, MAX_COMPLETION_PAGE);
+        const limit = parsePaginationValue(
+            pagination.limit,
+            "limit",
+            DEFAULT_COMPLETION_LIMIT,
+            MAX_COMPLETION_LIMIT
+        );
+        const skip = (page - 1) * limit;
         if (fromDate >= toDate) {
             throw validationError("The to date must be after the from date");
+        }
+
+        const rangeDays = (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24);
+        if (rangeDays > MAX_COMPLETION_RANGE_DAYS) {
+            throw validationError(
+                `Completion history range must be ${MAX_COMPLETION_RANGE_DAYS} days or fewer`
+            );
         }
 
         try {
@@ -179,32 +220,48 @@ function createScheduleCompletionService({ prismaClient = prisma } = {}) {
                 throw planNotFoundError();
             }
 
-            return await prismaClient.sessionCompletion.findMany({
-                where: {
-                    occurrenceDate: { gte: fromDate, lt: toDate },
-                    scheduleItem: {
-                        is: {
-                            subject: {
-                                is: {
-                                    planId,
-                                    plan: { is: { id: planId, userId } }
-                                }
+            const where = {
+                occurrenceDate: { gte: fromDate, lt: toDate },
+                scheduleItem: {
+                    is: {
+                        subject: {
+                            is: {
+                                planId,
+                                plan: { is: { id: planId, userId } }
                             }
                         }
                     }
-                },
-                orderBy: [
-                    { occurrenceDate: "asc" },
-                    { scheduleItemId: "asc" }
-                ],
-                select: {
-                    id: true,
-                    scheduleItemId: true,
-                    occurrenceDate: true,
-                    completedAt: true,
-                    actualDurationMinutes: true
                 }
-            });
+            };
+            const [completions, total] = await Promise.all([
+                prismaClient.sessionCompletion.findMany({
+                    where,
+                    orderBy: [
+                        { occurrenceDate: "asc" },
+                        { scheduleItemId: "asc" }
+                    ],
+                    skip,
+                    take: limit,
+                    select: {
+                        id: true,
+                        scheduleItemId: true,
+                        occurrenceDate: true,
+                        completedAt: true,
+                        actualDurationMinutes: true
+                    }
+                }),
+                prismaClient.sessionCompletion.count({ where })
+            ]);
+
+            return {
+                completions,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit)
+                }
+            };
         } catch (error) {
             throw mapPrismaError(error);
         }
@@ -286,5 +343,8 @@ const scheduleCompletionService = createScheduleCompletionService();
 module.exports = {
     ScheduleCompletionServiceError,
     createScheduleCompletionService,
+    MAX_COMPLETION_RANGE_DAYS,
+    MAX_COMPLETION_PAGE,
+    MAX_COMPLETION_LIMIT,
     ...scheduleCompletionService
 };

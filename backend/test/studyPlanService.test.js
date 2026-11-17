@@ -70,6 +70,11 @@ function createPrismaMock(overrides = {}) {
             deleteMany: async () => ({ count: 2 }),
             createMany: async () => ({ count: 2 }),
             ...(overrides.transaction && overrides.transaction.studySubject)
+        },
+        sessionCompletion: {
+            findFirst: async () => null,
+            count: async () => 0,
+            ...(overrides.transaction && overrides.transaction.sessionCompletion)
         }
     };
     const prismaClient = {
@@ -272,6 +277,9 @@ test("update replaces the complete DRAFT plan and its subjects within one transa
                             calls.push(["createMany", args]);
                             return { count: 1 };
                         }
+                    },
+                    sessionCompletion: {
+                        findFirst: async () => null
                     }
                 }));
             }
@@ -315,6 +323,47 @@ test("update replaces the complete DRAFT plan and its subjects within one transa
         studyPlanId: PLAN_ID
     });
     assert.equal(notificationCalls[0][1], transaction);
+});
+
+test("update prevents subject replacement from cascading completed sessions", async () => {
+    let updateAttempted = false;
+    let subjectDeletionAttempted = false;
+    const service = createStudyPlanService({
+        prismaClient: {
+            $transaction: async (callback) => callback({
+                studyPlan: {
+                    findFirst: async () => persistedPlan(),
+                    updateMany: async () => {
+                        updateAttempted = true;
+                        return { count: 1 };
+                    }
+                },
+                sessionCompletion: {
+                    findFirst: async (args) => {
+                        assert.deepEqual(args.where.scheduleItem.is.subject.is, { planId: PLAN_ID });
+                        return { id: "completed-session" };
+                    }
+                },
+                studySubject: {
+                    deleteMany: async () => {
+                        subjectDeletionAttempted = true;
+                    }
+                }
+            })
+        }
+    });
+
+    await assertServiceError(
+        service.updateStudyPlan(USER_A, PLAN_ID, validInput({
+            title: "Updated Plan",
+            weeklyTargetMinutes: 900,
+            subjects: [{ name: "Chemistry", targetMinutesPerWeek: 900 }]
+        })),
+        "INVALID_STATE",
+        409
+    );
+    assert.equal(updateAttempted, false);
+    assert.equal(subjectDeletionAttempted, false);
 });
 
 test("unchanged DRAFT updates perform no writes and create no notification", async () => {
@@ -592,6 +641,47 @@ test("delete rejects missing, other-user, and ACTIVE plans without deleting", as
         409
     );
     assert.equal(deleteCalls, 0);
+});
+
+test("delete preserves completed history on archived plans", async () => {
+    const history = [{ id: "completion-a" }];
+    let deleteCalls = 0;
+    let historyQuery;
+    const service = createStudyPlanService({
+        prismaClient: createPrismaMock({
+            transaction: {
+                studyPlan: {
+                    findFirst: async ({ where }) => {
+                        assert.deepEqual(where, { id: PLAN_ID, userId: USER_A });
+                        return { status: "ARCHIVED" };
+                    },
+                    deleteMany: async () => {
+                        deleteCalls += 1;
+                        history.length = 0;
+                        return { count: 1 };
+                    }
+                },
+                sessionCompletion: {
+                    count: async (args) => {
+                        historyQuery = args;
+                        return history.length;
+                    }
+                }
+            }
+        })
+    });
+
+    await assertServiceError(
+        service.deleteStudyPlan(USER_A, PLAN_ID),
+        "INVALID_STATE",
+        409
+    );
+    assert.deepEqual(historyQuery.where.scheduleItem.is.subject.is, {
+        planId: PLAN_ID,
+        plan: { is: { id: PLAN_ID, userId: USER_A } }
+    });
+    assert.equal(deleteCalls, 0);
+    assert.deepEqual(history, [{ id: "completion-a" }]);
 });
 
 test("update transaction failures propagate and unique violations are mapped safely", async () => {

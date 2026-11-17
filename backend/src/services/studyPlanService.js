@@ -62,6 +62,9 @@ function mapPrismaError(error) {
     if (error && error.code === "P2025") {
         return notFoundError();
     }
+    if (error && error.code === "P2034") {
+        return conflictError();
+    }
     return error;
 }
 
@@ -93,6 +96,17 @@ function dateOnly(value) {
     return value instanceof Date
         ? value.toISOString().slice(0, 10)
         : new Date(value).toISOString().slice(0, 10);
+}
+
+function dateInTimeZone(value, timeZone) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).formatToParts(value);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
 }
 
 function normalizedSubjectData(subjects) {
@@ -195,7 +209,8 @@ function validateScheduleReplacement(input) {
 
 function createStudyPlanService({
     prismaClient = prisma,
-    notificationService = null
+    notificationService = null,
+    clock = () => new Date()
 } = {}) {
     async function createStudyPlan(userId, input) {
         assertUserId(userId);
@@ -243,6 +258,133 @@ function createStudyPlanService({
         }
     }
 
+    async function activateStudyPlan(userId, planId) {
+        assertUserId(userId);
+        if (typeof planId !== "string" || !UUID_PATTERN.test(planId)) {
+            throw validationError("Study plan ID must be a valid UUID");
+        }
+
+        try {
+            return await prismaClient.$transaction(async (transaction) => {
+                const plan = await transaction.studyPlan.findFirst({
+                    where: { id: planId, userId },
+                    include: SCHEDULE_INCLUDE
+                });
+                if (!plan) {
+                    throw notFoundError();
+                }
+                if (plan.status === "ARCHIVED") {
+                    throw stateError("ARCHIVED study plans cannot be activated");
+                }
+                if (plan.status === "ACTIVE") {
+                    return plan;
+                }
+
+                const today = dateInTimeZone(clock(), plan.timeZone);
+                if (dateOnly(plan.endDate) < today) {
+                    throw stateError("An ended study plan cannot be activated");
+                }
+                if (
+                    plan.subjects.length === 0 ||
+                    plan.subjects.some((subject) => subject.scheduleItems.length === 0)
+                ) {
+                    throw stateError("A complete saved schedule is required before activation");
+                }
+
+                const activePlan = await transaction.studyPlan.findFirst({
+                    where: { userId, status: "ACTIVE" },
+                    select: { id: true }
+                });
+                if (activePlan && activePlan.id !== planId) {
+                    const deactivated = await transaction.studyPlan.updateMany({
+                        where: {
+                            id: activePlan.id,
+                            userId,
+                            status: "ACTIVE",
+                            activeUserId: userId
+                        },
+                        data: { status: "DRAFT", activeUserId: null }
+                    });
+                    if (deactivated.count === 0) {
+                        throw conflictError();
+                    }
+                }
+
+                const activated = await transaction.studyPlan.updateMany({
+                    where: {
+                        id: planId,
+                        userId,
+                        status: "DRAFT",
+                        activeUserId: null
+                    },
+                    data: { status: "ACTIVE", activeUserId: userId }
+                });
+                if (activated.count === 0) {
+                    const current = await transaction.studyPlan.findFirst({
+                        where: { id: planId, userId },
+                        include: SCHEDULE_INCLUDE
+                    });
+                    if (!current) {
+                        throw notFoundError();
+                    }
+                    if (current.status === "ACTIVE") {
+                        return current;
+                    }
+                    throw conflictError();
+                }
+
+                return transaction.studyPlan.findFirst({
+                    where: { id: planId, userId },
+                    include: SCHEDULE_INCLUDE
+                });
+            }, { isolationLevel: "Serializable" });
+        } catch (error) {
+            throw mapPrismaError(error);
+        }
+    }
+
+    async function deactivateStudyPlan(userId, planId) {
+        assertUserId(userId);
+        if (typeof planId !== "string" || !UUID_PATTERN.test(planId)) {
+            throw validationError("Study plan ID must be a valid UUID");
+        }
+
+        try {
+            return await prismaClient.$transaction(async (transaction) => {
+                const plan = await transaction.studyPlan.findFirst({
+                    where: { id: planId, userId },
+                    select: { id: true, status: true, activeUserId: true }
+                });
+                if (!plan) {
+                    throw notFoundError();
+                }
+                if (plan.status !== "ACTIVE" || plan.activeUserId !== userId) {
+                    throw stateError("Only the active study plan can be deactivated");
+                }
+
+                const result = await transaction.studyPlan.updateMany({
+                    where: {
+                        id: planId,
+                        userId,
+                        status: "ACTIVE",
+                        activeUserId: userId
+                    },
+                    data: { status: "DRAFT", activeUserId: null }
+                });
+                if (result.count === 0) {
+                    throw conflictError();
+                }
+
+                return transaction.studyPlan.findFirst({
+                    where: { id: planId, userId },
+                    include: SCHEDULE_INCLUDE
+                });
+            }, { isolationLevel: "Serializable" });
+        } catch (error) {
+            throw mapPrismaError(error);
+        }
+    }
+
     async function getStudyPlanById(userId, planId) {
         assertUserId(userId);
 
@@ -277,6 +419,25 @@ function createStudyPlanService({
                     return existingPlan;
                 }
 
+                const replacesSubjects = !hasSameSubjectData(existingPlan.subjects, data.subjects);
+                if (replacesSubjects) {
+                    const existingCompletion = await transaction.sessionCompletion.findFirst({
+                        where: {
+                            scheduleItem: {
+                                is: {
+                                    subject: {
+                                        is: { planId }
+                                    }
+                                }
+                            }
+                        },
+                        select: { id: true }
+                    });
+                    if (existingCompletion) {
+                        throw stateError("Study plan subjects cannot be changed after completed sessions");
+                    }
+                }
+
                 const updateResult = await transaction.studyPlan.updateMany({
                     where: {
                         id: planId,
@@ -303,7 +464,7 @@ function createStudyPlanService({
                     throw conflictError();
                 }
 
-                if (!hasSameSubjectData(existingPlan.subjects, data.subjects)) {
+                if (replacesSubjects) {
                     await transaction.studySubject.deleteMany({
                         where: { planId }
                     });
@@ -455,6 +616,24 @@ function createStudyPlanService({
                     throw stateError("Only DRAFT or ARCHIVED study plans can be deleted");
                 }
 
+                const completedSessionCount = await transaction.sessionCompletion.count({
+                    where: {
+                        scheduleItem: {
+                            is: {
+                                subject: {
+                                    is: {
+                                        planId,
+                                        plan: { is: { id: planId, userId } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                if (completedSessionCount > 0) {
+                    throw stateError("Study plans with completed sessions cannot be deleted");
+                }
+
                 const result = await transaction.studyPlan.deleteMany({
                     where: {
                         id: planId,
@@ -474,7 +653,7 @@ function createStudyPlanService({
                 }
 
                 return { id: planId };
-            });
+            }, { isolationLevel: "Serializable" });
         } catch (error) {
             throw mapPrismaError(error);
         }
@@ -484,6 +663,8 @@ function createStudyPlanService({
         createStudyPlan,
         listStudyPlans,
         getActiveStudyPlan,
+        activateStudyPlan,
+        deactivateStudyPlan,
         getStudyPlanById,
         updateStudyPlan,
         replaceStudySchedule,
