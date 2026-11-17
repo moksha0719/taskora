@@ -1,6 +1,7 @@
 const express = require("express");
 const authenticateToken = require("../middleware/authenticateToken");
 const { isValidTaskId, validateTaskInput } = require("../validators/taskValidators");
+const { createTaskService, TaskServiceError } = require("../services/taskService");
 const SAFE_TASK_SELECT = {
     id: true,
     title: true,
@@ -16,27 +17,20 @@ function isPrismaNotFound(error) {
     return error && error.code === "P2025";
 }
 
-function createTaskRouter(prisma, notificationService) {
+function createTaskRouter(prisma, notificationService, taskService = createTaskService({
+    prismaClient: prisma
+})) {
     const router = express.Router();
     router.use(authenticateToken);
 
     router.post("/", async (req, res, next) => {
-        const validation = validateTaskInput(req.body);
-        if (validation.error) {
-            return res.status(400).json({ error: validation.error });
-        }
-
         try {
-            const task = await prisma.task.create({
-                data: {
-                    ...validation.data,
-                    userId: req.user.id
-                },
-                select: SAFE_TASK_SELECT
-            });
-
+            const task = await taskService.createTask(req.user.id, req.body);
             return res.status(201).json({ task });
         } catch (error) {
+            if (error instanceof TaskServiceError) {
+                return res.status(error.status).json({ error: error.message });
+            }
             return next(error);
         }
     });

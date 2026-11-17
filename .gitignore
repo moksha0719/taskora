@@ -24,6 +24,7 @@ dist-ssr/
 
 # Backend Build Files
 build/
+backend/generated/
 
 
 # Test & Coverage Files

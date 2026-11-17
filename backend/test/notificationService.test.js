@@ -12,8 +12,20 @@ const TASK_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function createPrismaMock(overrides = {}) {
     const { notification = {}, ...prismaOverrides } = overrides;
-    return {
+    const client = {
         ...prismaOverrides,
+        task: {
+            findFirst: async () => ({ id: TASK_ID }),
+            ...(overrides.task || {})
+        },
+        studyPlan: {
+            findFirst: async () => ({ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }),
+            ...(overrides.studyPlan || {})
+        },
+        scheduleItem: {
+            findFirst: async () => ({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }),
+            ...(overrides.scheduleItem || {})
+        },
         notification: {
             create: async () => ({ id: NOTIFICATION_ID }),
             createMany: async () => ({ count: 1 }),
@@ -25,6 +37,8 @@ function createPrismaMock(overrides = {}) {
             ...notification
         }
     };
+    client.$transaction = async (callback) => callback(client);
+    return client;
 }
 
 function assertServiceError(promise, code, status) {
@@ -179,6 +193,40 @@ test("reports missing and cross-user notifications as not found", async () => {
     );
 });
 
+test("notification service rejects invalid pagination before issuing Prisma queries", async () => {
+    let queries = 0;
+    const service = createNotificationService({
+        prismaClient: createPrismaMock({
+            notification: {
+                findMany: async () => {
+                    queries += 1;
+                    return [];
+                },
+                count: async () => {
+                    queries += 1;
+                    return 0;
+                }
+            }
+        })
+    });
+
+    for (const pagination of [
+        { page: 0, limit: 20 },
+        { page: 1001, limit: 20 },
+        { page: 1.5, limit: 20 },
+        { page: 1, limit: 101 },
+        { page: 1, limit: Number.MAX_SAFE_INTEGER + 1 }
+    ]) {
+        await assertServiceError(
+            service.listNotifications(USER_ID, pagination),
+            "INVALID_INPUT",
+            400
+        );
+    }
+
+    assert.equal(queries, 0);
+});
+
 test("creates trusted internal notifications and safely ignores duplicate keys", async () => {
     const calls = [];
     const service = createNotificationService({
@@ -288,4 +336,49 @@ test("rejects untrusted, malformed, and inconsistent internal notification input
             400
         );
     }
+});
+
+test("rejects notifications that reference another user's task, plan, or schedule item", async () => {
+    const writes = [];
+    const service = createNotificationService({
+        prismaClient: createPrismaMock({
+            task: { findFirst: async () => null },
+            studyPlan: { findFirst: async () => null },
+            scheduleItem: { findFirst: async () => null },
+            notification: {
+                create: async (...args) => {
+                    writes.push(args);
+                    return { id: NOTIFICATION_ID };
+                },
+                createMany: async (...args) => {
+                    writes.push(args);
+                    return { count: 1 };
+                }
+            }
+        })
+    });
+
+    await assertServiceError(service.createNotification({
+        userId: USER_ID,
+        type: "task_due",
+        title: "Due soon",
+        message: "Review the task.",
+        taskId: TASK_ID
+    }), "INVALID_INPUT", 400);
+    await assertServiceError(service.createNotification({
+        userId: USER_ID,
+        type: "study_plan_updated",
+        title: "Plan updated",
+        message: "Review the plan.",
+        studyPlanId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    }), "INVALID_INPUT", 400);
+    await assertServiceError(service.createNotification({
+        userId: USER_ID,
+        type: "study_reminder",
+        title: "Study soon",
+        message: "Your session starts soon.",
+        scheduleItemId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    }), "INVALID_INPUT", 400);
+
+    assert.deepEqual(writes, []);
 });
