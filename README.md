@@ -4,7 +4,7 @@
 
 Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-> **Project status:** Phase 06 authentication and study-planning APIs are implemented, and the frontend uses them for registration, login, plan CRUD, schedule previews, and schedule completions. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Schedule previews cannot yet be saved or activated, and plan reads do not return completion records.
+> **Project status:** The frontend uses the Phase 06 APIs for registration, login, study-plan CRUD, calendar data, and schedule completions, including restoring completion history from the backend. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Generated previews can be saved through the backend API, but the frontend does not yet save previews or activate plans.
 
 ## Current features and prototype scope
 
@@ -16,7 +16,7 @@ The existing frontend describes these screens and interactions:
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
 | **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. An authenticated backend text-response endpoint exists, but proposal generation and approval are not integrated. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, and completion actions for saved schedule items. The API does not currently save previews, activate plans, or return existing completion records; completion status is temporarily cached in the browser. |
+| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, and completion actions/history for saved schedule items. The backend can persist a submitted schedule, but the frontend does not yet save generated previews or activate plans. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
 | **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
@@ -52,7 +52,7 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
 | Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
 | Frontend data layer | Typed API client plus mock APIs and browser `localStorage` | Authentication and Phase 06 study planning use Express; other prototype features remain mocked |
-| Backend | Node.js, Express, CORS, dotenv | Authentication, tasks, AI, Brain Dump, and study-planning routes are present |
+| Backend | Node.js, Express, CORS, dotenv | Authentication, tasks, AI, Brain Dump, Study Planner, and notification routes are present |
 | Database | PostgreSQL | Configured through the backend Docker Compose setup |
 | ORM | Prisma | Schema and migrations are present |
 | Authentication | Password hashing and JWT | Backend-backed registration and login |
@@ -132,14 +132,9 @@ From the repository root:
 npm install
 ```
 
-For the backend, open a second terminal:
-
-```bash
-cd backend
-npm install
-```
-
-These install the dependencies declared by the respective package manifests. The root and backend are separate npm projects.
+For backend-specific installation, environment variable names, database setup,
+Docker development, production migration order, and troubleshooting, see the
+[backend deployment guide](./backend/README.md).
 
 ## Environment variables
 
@@ -215,6 +210,34 @@ For containerized local development:
 
 Use a separate database for tests and production. Never put real database credentials in source files or commit them.
 
+### Production migration sequence
+
+The backend exposes a one-shot production migration command:
+
+```bash
+npm --prefix backend run db:deploy
+```
+
+It runs `prisma migrate deploy` against `backend/prisma/schema.prisma` and its
+adjacent `backend/prisma/migrations` directory. Run it from a single release or
+migration job using the deployment's `DATABASE_URL`, wait for success, and only
+then deploy or roll out application replicas. The app start command
+(`npm start`, also the Docker production target's Node entry point) does not
+apply migrations, so replicas will not race to migrate during startup. The
+multi-stage Dockerfile has a separate `migration` target containing Prisma CLI:
+
+```bash
+docker build --target migration -t taskora-backend-migrate:release backend
+docker run --rm -e DATABASE_URL taskora-backend-migrate:release
+```
+
+Run that one-shot job once and require a successful exit before deploying the
+production image. Build the runtime image separately with
+`docker build --target production -t taskora-backend:release backend`. The
+checked-in `backend/docker-compose.yml` explicitly builds the `development`
+target and remains a local development stack; it is not the production
+migration runner.
+
 ## API documentation
 
 ### Currently implemented
@@ -228,13 +251,13 @@ The backend exposes these API areas:
 | `POST` | `/api/auth/login` | Sign in and receive a JWT. |
 | `GET` | `/api/auth/me` | Resolve the authenticated user. |
 | `*` | `/api/study-plans/*` | Study-plan CRUD, schedule preview, and completion operations; see [Phase 06 API contract](./docs/phase06-api-contract.md). |
-| `*` | `/api/tasks/*`, `/api/ai/*`, `/api/brain-dumps/*` | Task, AI, and Brain Dump APIs. |
+| `*` | `/api/tasks/*`, `/api/ai/*`, `/api/brain-dumps/*`, `/api/notifications/*` | Task, AI, Brain Dump, and notification APIs. |
 
 Local base URL: `http://localhost:5000`. The frontend API base URL is configured with `VITE_API_BASE_URL`.
 
-### Planned API areas
+### Frontend integration gaps
 
-Additional API areas, including notifications, remain on the roadmap. Request and response schemas, authentication requirements, error formats, and endpoint examples should be documented alongside each implemented API; do not treat planned routes as available endpoints.
+Additional frontend features still use mock APIs or browser storage, including notifications. Request and response schemas, authentication requirements, error formats, and endpoint examples are documented in the backend API contracts; do not treat planned frontend integrations as available.
 
 ## Testing and acceptance scenarios
 
@@ -259,7 +282,7 @@ The original README listed the following SRS acceptance scenarios. They are reta
 
 ## Next steps
 
-The backend provides authentication, task, AI Assistant, Brain Dump, and Study Planner APIs. Authentication and Study Planner are integrated with the frontend; other prototype features still use mock data. Remaining work includes integrating those features with their APIs, implementing additional API areas such as notifications, and validating deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
+The backend provides authentication, task, AI Assistant, Brain Dump, Study Planner, and notification APIs. Authentication and Study Planner are integrated with the frontend; other prototype features still use mock data. Remaining work includes integrating those features with their APIs and validating deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
 
 ## Team contribution overview
 

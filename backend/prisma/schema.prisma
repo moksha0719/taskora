@@ -40,6 +40,14 @@ enum ScheduleItemKind {
   REVIEW
 }
 
+enum NotificationType {
+  TASK_DUE           @map("task_due")
+  TASK_COMPLETED     @map("task_completed")
+  STUDY_REMINDER     @map("study_reminder")
+  STUDY_PLAN_UPDATED @map("study_plan_updated")
+  SYSTEM             @map("system")
+}
+
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -48,7 +56,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tasks     Task[]
-  studyPlans StudyPlan[]
+  studyPlans     StudyPlan[]
+  notifications Notification[]
 }
 
 model Task {
@@ -62,6 +71,7 @@ model Task {
   updatedAt   DateTime     @updatedAt
   userId      String       @db.Uuid
   user        User         @relation(fields: [userId], references: [id])
+  notifications Notification[]
 
   @@index([userId])
   @@index([status])
@@ -83,6 +93,7 @@ model StudyPlan {
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  notifications         Notification[]
   subjects             StudySubject[]
 
   @@index([userId, status])
@@ -111,6 +122,7 @@ model ScheduleItem {
   topics            String[]            @default([]) // Required; the migration also enforces NOT NULL.
   subject           StudySubject        @relation(fields: [subjectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   completions       SessionCompletion[]
+  notifications     Notification[]
 
   @@index([subjectId, dayOfWeek])
 }
@@ -125,4 +137,27 @@ model SessionCompletion {
 
   @@unique([scheduleItemId, occurrenceDate])
   @@index([occurrenceDate])
+}
+
+model Notification {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  type            NotificationType
+  title           String
+  message         String
+  actionUrl       String?
+  readAt          DateTime?
+  createdAt       DateTime         @default(now())
+  dedupeKey       String?          @unique
+  taskId          String?          @db.Uuid
+  studyPlanId     String?          @db.Uuid
+  scheduleItemId  String?          @db.Uuid
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  task            Task?            @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  studyPlan       StudyPlan?       @relation(fields: [studyPlanId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  scheduleItem    ScheduleItem?    @relation(fields: [scheduleItemId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId, createdAt, id])
+  @@index([userId, readAt, createdAt])
+  @@index([userId, type, createdAt])
 }

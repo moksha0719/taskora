@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const { rateLimit } = require("express-rate-limit");
 const { JWT_AUDIENCE, JWT_ISSUER, getJwtSecret } = require("../config/auth");
 const authenticateToken = require("../middleware/authenticateToken");
+const { validateCredentials } = require("../validators/authValidators");
 
 const SAFE_USER_SELECT = {
     id: true,
@@ -18,44 +19,6 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex
 const REGISTRATION_RESPONSE = {
     message: "If registration can be completed, you can now sign in."
 };
-
-function normalizeEmail(value) {
-    return value.trim().toLowerCase();
-}
-
-function isValidEmail(email) {
-    return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function validateCredentials(body, includeName = false) {
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-        return { error: "A JSON object is required" };
-    }
-
-    if (includeName && (typeof body.name !== "string" || !body.name.trim() || body.name.trim().length > 100)) {
-        return { error: "Name is required and must be 100 characters or fewer" };
-    }
-
-    if (typeof body.email !== "string" || !body.email.trim()) {
-        return { error: "Email is required" };
-    }
-
-    const email = normalizeEmail(body.email);
-    if (!isValidEmail(email)) {
-        return { error: "A valid email is required" };
-    }
-
-    if (typeof body.password !== "string" || !body.password) {
-        return { error: "Password is required" };
-    }
-
-    const passwordBytes = Buffer.byteLength(body.password, "utf8");
-    if (passwordBytes < 8 || passwordBytes > 72) {
-        return { error: "Password must be between 8 and 72 bytes" };
-    }
-
-    return { email };
-}
 
 function createAuthRouter(prisma) {
     const router = express.Router();
@@ -77,8 +40,8 @@ function createAuthRouter(prisma) {
             const passwordHash = await bcrypt.hash(req.body.password, BCRYPT_ROUNDS);
             await prisma.user.create({
                 data: {
-                    name: req.body.name.trim(),
-                    email: validation.email,
+                    name: validation.data.name,
+                    email: validation.data.email,
                     password: passwordHash
                 },
                 select: SAFE_USER_SELECT
@@ -102,7 +65,7 @@ function createAuthRouter(prisma) {
 
         try {
             const user = await prisma.user.findUnique({
-                where: { email: validation.email },
+                where: { email: validation.data.email },
                 select: { ...SAFE_USER_SELECT, password: true }
             });
 

@@ -311,6 +311,14 @@ export const studyPlansApi = {
     return studyPlan;
   },
 
+  async getCompletions(planId: string, from: string, to: string): Promise<StudyCompletion[]> {
+    const query = new URLSearchParams({ from, to });
+    const { completions } = await requestApi<{ completions: StudyCompletion[] }>(
+      `/api/study-plans/${encodeURIComponent(planId)}/completions?${query}`
+    );
+    return completions;
+  },
+
   async getCalendarPlans(): Promise<ApiStudyPlan[]> {
     const plans = await this.getPlans();
     return Promise.all(plans.map(({ id }) => this.getPlan(id)));
