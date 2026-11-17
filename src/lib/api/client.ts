@@ -355,6 +355,15 @@ export const studyPlansApi = {
     return schedule;
   },
 
+  async saveSchedule(planId: string, schedule: StudySchedulePreviewItem[]): Promise<ApiStudyPlan> {
+    const { studyPlan } = await requestApi<{ studyPlan: ApiStudyPlan }>(
+      `/api/study-plans/${encodeURIComponent(planId)}/schedule`,
+      { method: 'PUT', body: JSON.stringify({ schedule }) }
+    );
+    notifyStudyPlansUpdated();
+    return studyPlan;
+  },
+
   async upsertCompletion(
     planId: string,
     itemId: string,
