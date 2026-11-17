@@ -126,4 +126,15 @@ describe('study plan calendar refresh notifications', () => {
     expect(JSON.parse(options.body as string)).toEqual({ schedule });
     expect(onUpdated).toHaveBeenCalledOnce();
   });
+
+  it('reports a useful error when an API route returns an HTML error page', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('<!doctype html><title>Not Found</title>', {
+      status: 404,
+      headers: { 'Content-Type': 'text/html' },
+    }));
+
+    await expect(studyPlansApi.getPlans()).rejects.toThrow(
+      'The API returned a non-JSON error response (HTTP 404). Check VITE_API_BASE_URL and verify that the backend endpoint is available.'
+    );
+  });
 });

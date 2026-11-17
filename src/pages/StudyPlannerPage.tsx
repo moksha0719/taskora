@@ -763,7 +763,7 @@ export const StudyPlannerPage: React.FC = () => {
               <Calendar className="mx-auto h-8 w-8 text-primary" />
               <h3 className="mt-3 text-base font-bold text-deep-purple dark:text-white">No saved schedule items</h3>
               <p className="mx-auto mt-1 max-w-lg text-sm text-muted-purple">
-                Generate a preview using your actual available times. The current API does not provide an endpoint to save the preview or activate a plan.
+                Generate a preview using your actual available times, then save it to this plan.
               </p>
             </Card>
           )}
