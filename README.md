@@ -4,7 +4,7 @@
 
 Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-> **Project status:** The frontend uses the Phase 06 APIs for registration, login, study-plan CRUD, calendar data, and schedule completions, including restoring completion history from the backend. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Generated previews can be saved through the backend API, but the frontend does not yet save previews or activate plans.
+> **Project status:** The frontend uses the Phase 06 APIs for registration, login, study-plan CRUD, calendar data, schedule persistence, and completion history. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Plans cannot be activated through the current API.
 
 ## Current features and prototype scope
 
@@ -16,7 +16,7 @@ The existing frontend describes these screens and interactions:
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
 | **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. An authenticated backend text-response endpoint exists, but proposal generation and approval are not integrated. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, and completion actions/history for saved schedule items. The backend can persist a submitted schedule, but the frontend does not yet save generated previews or activate plans. |
+| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, saved schedule display on the planner and calendar views, schedule previews using explicit availability windows, schedule persistence, and completion actions/history. The current API does not expose plan activation. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
 | **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |

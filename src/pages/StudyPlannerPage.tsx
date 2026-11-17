@@ -59,26 +59,34 @@ interface PlanForm {
 
 type AvailabilityForm = Record<StudyDayCode, { start: string; end: string }>;
 
-function localDateString(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+function studyPlanDateString(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) {
+    throw new Error(`Unable to format the date in ${TIME_ZONE}.`);
+  }
   return `${year}-${month}-${day}`;
 }
 
-function nextDateString(date: string): string {
-  const nextDate = new Date(`${date}T00:00:00.000Z`);
-  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
-  return nextDate.toISOString().slice(0, 10);
+function addCalendarDays(date: string, days: number): string {
+  const result = new Date(`${date}T00:00:00.000Z`);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result.toISOString().slice(0, 10);
 }
 
 function newPlanForm(): PlanForm {
-  const endDate = new Date();
-  endDate.setDate(endDate.getDate() + 30);
+  const startDate = studyPlanDateString();
   return {
     title: '',
-    startDate: localDateString(),
-    endDate: localDateString(endDate),
+    startDate,
+    endDate: addCalendarDays(startDate, 30),
     weeklyTargetMinutes: '600',
     studyDaysPerWeek: '4',
     timeZone: TIME_ZONE,
@@ -146,8 +154,9 @@ export const StudyPlannerPage: React.FC = () => {
   const [availability, setAvailability] = useState<AvailabilityForm>(emptyAvailability);
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState<StudySchedulePreviewItem[] | null>(null);
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
-  const [completionDate, setCompletionDate] = useState(localDateString());
+  const [completionDate, setCompletionDate] = useState(studyPlanDateString());
   const [completionStates, setCompletionStates] = useState<Record<string, boolean>>({});
   const [actualDurations, setActualDurations] = useState<Record<string, string>>({});
   const [busyCompletion, setBusyCompletion] = useState<string | null>(null);
@@ -214,7 +223,7 @@ export const StudyPlannerPage: React.FC = () => {
     setCompletionStates({});
     setActualDurations({});
 
-    studyPlansApi.getCompletions(planId, completionDate, nextDateString(completionDate))
+    studyPlansApi.getCompletions(planId, completionDate, addCalendarDays(completionDate, 1))
       .then((completions) => {
         if (!isCurrentRequest) return;
         setCompletionStates(Object.fromEntries(
@@ -428,6 +437,25 @@ export const StudyPlannerPage: React.FC = () => {
     }
   };
 
+  const saveGeneratedSchedule = async () => {
+    if (!plan || !preview) return;
+
+    setSavingSchedule(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const savedPlan = await studyPlansApi.saveSchedule(plan.id, preview);
+      setPlan(savedPlan);
+      setPlans((current) => current.map((item) => item.id === savedPlan.id ? savedPlan : item));
+      setPreview(null);
+      setNotice('Generated schedule saved to this plan.');
+    } catch (cause) {
+      handleApiError(cause);
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
   const saveCompletion = async (itemId: string) => {
     if (!plan) return;
     const stateKey = `${plan.id}:${itemId}:${completionDate}`;
@@ -567,7 +595,7 @@ export const StudyPlannerPage: React.FC = () => {
 
           {plan.status === 'DRAFT' && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              Plans are created as drafts. The current API has no activation or schedule-save endpoint, so generated schedules remain previews.
+              Plans are created as drafts. The API does not expose activation; saving a schedule does not activate the plan.
             </div>
           )}
 
@@ -694,10 +722,21 @@ export const StudyPlannerPage: React.FC = () => {
                   <div>
                     <h3 className="text-lg font-bold font-heading text-deep-purple dark:text-white">Schedule preview</h3>
                     <p className="mt-1 text-xs text-muted-purple">
-                      Not saved. Times reflect the availability you entered in {plan.timeZone}.
+                      Save this preview to add the sessions to your plan. Times reflect the availability you entered in {plan.timeZone}.
                     </p>
                   </div>
-                  <Badge variant="primary">{preview.length} sessions</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="primary">{preview.length} sessions</Badge>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      disabled={savingSchedule || preview.length === 0}
+                      onClick={() => void saveGeneratedSchedule()}
+                    >
+                      {savingSchedule ? 'Saving...' : 'Save schedule'}
+                    </Button>
+                  </div>
                 </div>
                 {preview.length === 0 ? (
                   <p className="py-6 text-center text-sm text-muted-purple">No sessions were returned for this preview.</p>
@@ -993,7 +1032,7 @@ export const StudyPlannerPage: React.FC = () => {
             </div>
 
             <p className="rounded-xl bg-primary-subtle/30 px-3 py-2 text-xs text-muted-purple">
-              Total target: {formatHours(plan.weeklyTargetMinutes)} · Sessions are preview-only and are not saved to the plan.
+              Total target: {formatHours(plan.weeklyTargetMinutes)} · Generation returns a preview; save it afterward to add sessions to the plan.
             </p>
             <div className="flex justify-end gap-2 border-t border-subtle pt-3">
               <Button type="button" variant="ghost" size="sm" onClick={() => setIsGeneratorModalOpen(false)}>Cancel</Button>
