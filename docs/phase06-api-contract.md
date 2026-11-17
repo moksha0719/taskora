@@ -1,5 +1,7 @@
 # Phase 06 Study Planner API Contract
 
+For authentication, task, AI Assistant, Brain Dump, health, and frontend compatibility details, see the [Taskora Backend API Contract](./backend-api-contract.md).
+
 Base path: `/api/study-plans`
 
 All endpoints below require a valid JWT:
@@ -20,11 +22,13 @@ The study-plan router applies authentication to every endpoint. Middleware verif
 | `GET` | `/api/study-plans/:id` | `200`, `{ "studyPlan": ... }` |
 | `PUT` | `/api/study-plans/:id` | `200`, `{ "studyPlan": ... }` |
 | `DELETE` | `/api/study-plans/:id` | `204`, no response body |
+| `PUT` | `/api/study-plans/:id/schedule` | `200`, `{ "studyPlan": ... }` |
 | `POST` | `/api/study-plans/generate` | `200`, `{ "schedule": [...] }` |
+| `GET` | `/api/study-plans/:planId/completions?from=YYYY-MM-DD&to=YYYY-MM-DD` | `200`, `{ "completions": [...] }` |
 | `PUT` | `/api/study-plans/:planId/schedule-items/:itemId/completions/:date` | `200`, `{ "completion": ... }` |
 | `DELETE` | `/api/study-plans/:planId/schedule-items/:itemId/completions/:date` | `200`, `{ "completion": ..., "deleted": true }` |
 
-`/active` is a static path, not a plan ID. Plan and schedule-item IDs in paths must match the UUID shape `8-4-4-4-12` hexadecimal characters.
+`/active` and `/generate` are static paths, not plan IDs. Plan and schedule-item IDs in paths must match the UUID shape `8-4-4-4-12` hexadecimal characters.
 
 ## Study plan create and update
 
@@ -63,6 +67,11 @@ Optional plan field:
 
 - `timeZone`: valid, trimmed IANA timezone string. Defaults to `Asia/Colombo`.
 
+Plan `startDate` and `endDate` are civil dates and are returned as
+`YYYY-MM-DD`, without a time or UTC offset. Weekly schedule recurrences use
+the plan's IANA timezone; when omitted, that timezone defaults to
+`Asia/Colombo`.
+
 Each subject requires:
 
 - `name`: non-empty string; trimmed and unique case-insensitively within the plan.
@@ -75,7 +84,7 @@ Optional subject fields:
 
 The sum of all `subjects[].targetMinutesPerWeek` values must equal `weeklyTargetMinutes`. `userId`, `status`, and other unsupported fields are rejected.
 
-Successful create and update responses contain the persisted plan and its subjects. A plan includes the schema scalar fields `id`, `userId`, `activeUserId`, `title`, `status`, `startDate`, `endDate`, `timeZone`, `weeklyTargetMinutes`, `studyDaysPerWeek`, `createdAt`, and `updatedAt`. Prisma dates serialize as ISO date-time strings in JSON; for example, a stored date-only value is returned at UTC midnight.
+Successful create and update responses contain the persisted plan and its subjects. A plan includes the schema scalar fields `id`, `userId`, `activeUserId`, `title`, `status`, `startDate`, `endDate`, `timeZone`, `weeklyTargetMinutes`, `studyDaysPerWeek`, `createdAt`, and `updatedAt`. Plan `startDate` and `endDate` are serialized as civil dates in `YYYY-MM-DD` format; `createdAt` and `updatedAt` remain UTC ISO timestamps.
 
 Example create response (IDs and timestamps are illustrative):
 
@@ -87,8 +96,8 @@ Example create response (IDs and timestamps are illustrative):
     "activeUserId": null,
     "title": "Fall Semester Plan",
     "status": "DRAFT",
-    "startDate": "2026-11-16T00:00:00.000Z",
-    "endDate": "2026-12-20T00:00:00.000Z",
+    "startDate": "2026-11-16",
+    "endDate": "2026-12-20",
     "timeZone": "Asia/Colombo",
     "weeklyTargetMinutes": 600,
     "studyDaysPerWeek": 4,
@@ -168,9 +177,106 @@ The response contains sessions shaped as follows:
 
 Durations are between 1 and 150 minutes. Generated sessions do not overlap, stay inside their supplied windows and sum to each subject's weekly target. The output uses `kind: "STUDY"`; review-session rules are not implemented.
 
-Availability must be supplied by the caller; the backend does not infer a user's free time. The plan's `timeZone` is validated and stored by plan CRUD, but the generation service does not read it or define a timezone conversion for availability windows. The frontend and backend still need an agreed timezone interpretation for those minute-of-day values.
+Availability must be supplied by the caller; the backend does not infer a user's free time. The preview service treats the supplied minute-of-day values as local clock values without converting time zones. Persisted schedule reminders use the plan's IANA `timeZone` to interpret a weekday and minute-of-day as local time.
+
+## Persisting a generated schedule
+
+Schedule generation is preview-only. To save that schedule to an owned plan, send the preview's `schedule` array to:
+
+```http
+PUT /api/study-plans/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schedule
+Authorization: Bearer <JWT>
+Content-Type: application/json
+```
+
+```json
+{
+  "schedule": [
+    {
+      "subjectId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "subjectName": "Mathematics",
+      "dayOfWeek": "MON",
+      "startMinuteOfDay": 540,
+      "durationMinutes": 150,
+      "kind": "STUDY"
+    },
+    {
+      "subjectId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "subjectName": "Mathematics",
+      "dayOfWeek": "TUE",
+      "startMinuteOfDay": 540,
+      "durationMinutes": 150,
+      "kind": "STUDY"
+    },
+    {
+      "subjectId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "subjectName": "Mathematics",
+      "dayOfWeek": "WED",
+      "startMinuteOfDay": 540,
+      "durationMinutes": 150,
+      "kind": "STUDY"
+    },
+    {
+      "subjectId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "subjectName": "Mathematics",
+      "dayOfWeek": "THU",
+      "startMinuteOfDay": 540,
+      "durationMinutes": 150,
+      "kind": "STUDY"
+    }
+  ]
+}
+```
+
+The schedule must contain at least one session. Every session requires a UUID `subjectId` belonging to the target plan, a valid `dayOfWeek`, `startMinuteOfDay` from `0` to `1439`, `durationMinutes` from `1` to `150`, and `kind: "STUDY"`. `subjectName` is optional; if supplied, it must match the current subject name. Unsupported fields are rejected.
+
+The complete schedule must:
+
+- Use exactly `studyDaysPerWeek` distinct days.
+- Sum to each plan subject's `targetMinutesPerWeek` exactly.
+- Have no overlapping sessions on the same day.
+- Keep each session within the same day (start plus duration no greater than `1440`).
+
+Saving replaces the plan's existing schedule in a transaction. The plan must belong to the caller and must not be `ARCHIVED`. A schedule with recorded completions cannot be replaced. The response is `{ "studyPlan": ... }` with the persisted subjects and schedule items. Another user's or missing plan returns `404`; an archived plan or schedule with completions returns `409`; malformed or inconsistent schedules return `400`.
+
+The schedule-save API does not activate a plan. The current backend has no plan activation endpoint.
 
 ## Schedule completion
+
+### Listing completion history
+
+`GET /api/study-plans/:planId/completions` returns completions for schedule
+items belonging to the caller's plan. Both query parameters are required,
+strict `YYYY-MM-DD` calendar dates. The range includes `from` and excludes
+`to`; `to` must be after `from`.
+
+```http
+GET /api/study-plans/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/completions?from=2026-11-16&to=2026-11-23
+Authorization: Bearer <JWT>
+```
+
+Success (`200`), ordered by occurrence date and then schedule-item ID:
+
+```json
+{
+  "completions": [
+    {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "occurrenceDate": "2026-11-16",
+      "completedAt": "2026-11-16T12:00:00.000Z",
+      "actualDurationMinutes": 45
+    }
+  ]
+}
+```
+
+`occurrenceDate` is a civil date returned as `YYYY-MM-DD`, not an instant.
+`completedAt` remains a UTC ISO timestamp. If no records match, the response
+is `{ "completions": [] }`. Malformed plan IDs return `400`; well-formed but
+nonexistent plans and plans belonging to another user return `404`. Invalid
+dates, a non-increasing range, or unsupported query parameters return `400`.
+Authentication is required.
 
 The date is in the URL, not the body. `PUT` creates a completion or updates the existing completion for the same schedule item and date.
 
@@ -194,26 +300,97 @@ Successful `PUT` response:
   "completion": {
     "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    "occurrenceDate": "2026-11-16T00:00:00.000Z",
+    "occurrenceDate": "2026-11-16",
     "completedAt": "2026-11-16T12:00:00.000Z",
     "actualDurationMinutes": 45
   }
 }
 ```
 
-The `date` path parameter must be a real `YYYY-MM-DD` calendar date. `DELETE` does not use a request body and returns the deleted key:
+For `PUT`, the `date` path parameter must be a real `YYYY-MM-DD` calendar date
+within the plan's inclusive `startDate` and `endDate` range. Occurrences on
+either boundary date are accepted; dates outside the plan range return `400`.
+`DELETE` does not use a request body and returns the deleted key, with the
+occurrence date in the same civil-date format:
 
 ```json
 {
   "completion": {
     "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    "occurrenceDate": "2026-11-16T00:00:00.000Z"
+    "occurrenceDate": "2026-11-16"
   },
   "deleted": true
 }
 ```
 
-The service verifies that the plan belongs to the authenticated user and that the schedule item belongs to that plan. A plan or item that is missing, belongs to another user, or belongs to another plan is reported as not found. The schema's unique constraint is `(scheduleItemId, occurrenceDate)`. The service does not additionally require the occurrence date to fall within the plan's start/end dates or to match the item's weekday.
+The service verifies that the plan belongs to the authenticated user and that the schedule item belongs to that plan. A plan or item that is missing, belongs to another user, or belongs to another plan is reported as not found. The schema's unique constraint is `(scheduleItemId, occurrenceDate)`. The service does not additionally require the occurrence date to match the item's weekday.
+
+## Notifications
+
+All notification endpoints use the JWT authentication described above. Notification list and mutation operations are always scoped to `req.user.id`; clients cannot create notifications or select another user's notifications.
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/notifications` | `200`, `{ "notifications": [...], "pagination": {...} }` |
+| `GET` | `/api/notifications/unread-count` | `200`, `{ "unreadCount": 0 }` |
+| `PATCH` | `/api/notifications/read-all` | `200`, `{ "updatedCount": 0 }` |
+| `PATCH` | `/api/notifications/:id/read` | `200`, `{ "notification": ... }` |
+| `DELETE` | `/api/notifications/:id` | `204`, no response body |
+
+`GET /api/notifications` accepts only these query parameters:
+
+| Parameter | Optional | Validation/default |
+| --- | --- | --- |
+| `type` | Yes | One of `task_due`, `task_completed`, `study_reminder`, `study_plan_updated`, `system`. |
+| `unreadOnly` | Yes | Exactly `true` or `false`; defaults to `false`. |
+| `page` | Yes | Positive integer; defaults to `1`. |
+| `limit` | Yes | Positive integer up to `100`; defaults to `20`. |
+
+Unknown query parameters and malformed values return `400`. Notifications are ordered newest first, with ID as a stable tie-breaker. Example:
+
+```http
+GET /api/notifications?type=task_due&unreadOnly=true&page=1&limit=20
+Authorization: Bearer <JWT>
+```
+
+```json
+{
+  "notifications": [
+    {
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "type": "task_due",
+      "title": "Task due soon",
+      "message": "Finish assignment is due within 24 hours.",
+      "read": false,
+      "actionUrl": "/tasks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "createdAt": "2026-11-16T12:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 1,
+    "totalPages": 1
+  }
+}
+```
+
+`PATCH /api/notifications/:id/read` and `PATCH /api/notifications/read-all` take no body. Marking one notification read is idempotent; the response contains the notification with `"read": true`. The mark-all response's `updatedCount` is the number of unread notifications changed. `DELETE /api/notifications/:id` returns `204`; a missing or another user's ID returns `404`.
+
+Notification fields are `id`, `userId`, `type`, `title`, `message`, `read`, `actionUrl`, and `createdAt`. `actionUrl` is either `null` or a local application path beginning with a single `/`. There is intentionally no public notification-create endpoint.
+
+The backend creates these notifications internally:
+
+- `task_completed`: when an owned task changes to `COMPLETED`; repeated updates to an already-completed task do not create another event notification.
+- `study_plan_updated`: after an owned `DRAFT` plan update commits.
+- `task_due`: for non-completed tasks due within the next 24 hours.
+- `study_reminder`: 15 minutes before a persisted weekly schedule item, only
+  when the candidate occurrence's local date in the plan timezone falls
+  within the inclusive plan start/end dates.
+- `system`: supported as a notification type for trusted internal backend use; no public client creation route exists.
+
+Due-task and study-session reminders are checked by the backend scheduler once per minute. Database-unique deduplication keys prevent repeats across scheduler runs and concurrent instances. Study reminders are based only on saved schedule items, never on a preview. The scheduler interprets recurring weekdays and minute-of-day values in the study plan's IANA timezone, defaulting to `Asia/Colombo`, and enforces the inclusive plan date range using that timezone's local date. A local time that does not exist during a daylight-saving transition is skipped. Task due dates are stored as instants; date-only task inputs are interpreted as UTC midnight because tasks have no timezone field.
 
 ## Errors and status codes
 
@@ -241,3 +418,5 @@ Plan deletion is the successful operation that returns no body (`204`).
 - List, active lookup, read, update, and delete are scoped to the authenticated user.
 - Schedule completion operations verify both plan ownership and schedule-item membership in that plan before writing or deleting.
 - Schedule preview is stateless and does not persist anything. Its top-level request does not accept a client-supplied `userId`.
+- Schedule persistence, completion, and notification routes derive ownership only from the JWT's subject claim.
+- Notification reads, updates, and deletes include the authenticated user ID in their database filters. Repeated scheduler runs are protected by a unique deduplication key.

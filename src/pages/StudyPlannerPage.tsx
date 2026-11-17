@@ -27,10 +27,6 @@ import {
   StudySchedulePreviewItem,
 } from '../types';
 import { cn } from '../lib/utils';
-import {
-  readTemporaryCompletionStates,
-  writeTemporaryCompletionState,
-} from '../lib/temporaryCompletionStateCache';
 
 const TIME_ZONE = 'Asia/Colombo';
 const DAYS: { code: StudyDayCode; label: string }[] = [
@@ -68,6 +64,12 @@ function localDateString(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function nextDateString(date: string): string {
+  const nextDate = new Date(`${date}T00:00:00.000Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  return nextDate.toISOString().slice(0, 10);
 }
 
 function newPlanForm(): PlanForm {
@@ -149,6 +151,7 @@ export const StudyPlannerPage: React.FC = () => {
   const [completionStates, setCompletionStates] = useState<Record<string, boolean>>({});
   const [actualDurations, setActualDurations] = useState<Record<string, string>>({});
   const [busyCompletion, setBusyCompletion] = useState<string | null>(null);
+  const [loadingCompletions, setLoadingCompletions] = useState(false);
 
   const handleApiError = useCallback((cause: unknown) => {
     if (cause instanceof ApiError && cause.status === 401) {
@@ -196,13 +199,50 @@ export const StudyPlannerPage: React.FC = () => {
     void loadPlans();
   }, [loadPlans]);
 
+  const planId = plan?.id;
   useEffect(() => {
-    try {
-      setCompletionStates(readTemporaryCompletionStates());
-    } catch (cause) {
-      handleApiError(cause);
+    if (!planId || !completionDate) {
+      setCompletionStates({});
+      setActualDurations({});
+      setLoadingCompletions(false);
+      return;
     }
-  }, [handleApiError]);
+
+    let isCurrentRequest = true;
+    setLoadingCompletions(true);
+    setError(null);
+    setCompletionStates({});
+    setActualDurations({});
+
+    studyPlansApi.getCompletions(planId, completionDate, nextDateString(completionDate))
+      .then((completions) => {
+        if (!isCurrentRequest) return;
+        setCompletionStates(Object.fromEntries(
+          completions.map(({ scheduleItemId, occurrenceDate }) => [
+            `${planId}:${scheduleItemId}:${occurrenceDate}`,
+            true,
+          ])
+        ));
+        setActualDurations(Object.fromEntries(
+          completions
+            .filter(({ actualDurationMinutes }) => actualDurationMinutes !== null)
+            .map(({ scheduleItemId, occurrenceDate, actualDurationMinutes }) => [
+              `${planId}:${scheduleItemId}:${occurrenceDate}`,
+              String(actualDurationMinutes),
+            ])
+        ));
+      })
+      .catch((cause: unknown) => {
+        if (isCurrentRequest) handleApiError(cause);
+      })
+      .finally(() => {
+        if (isCurrentRequest) setLoadingCompletions(false);
+      });
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [completionDate, handleApiError, planId]);
 
   const persistedSchedule = useMemo(() => plan ? scheduleItemsFor(plan) : [], [plan]);
   const subjectTargetTotal = planForm.subjects.reduce(
@@ -406,7 +446,6 @@ export const StudyPlannerPage: React.FC = () => {
     try {
       await studyPlansApi.upsertCompletion(plan.id, itemId, completionDate, actualDurationMinutes);
       setCompletionStates((current) => ({ ...current, [stateKey]: true }));
-      writeTemporaryCompletionState(stateKey, true);
     } catch (cause) {
       handleApiError(cause);
     } finally {
@@ -422,7 +461,6 @@ export const StudyPlannerPage: React.FC = () => {
     try {
       await studyPlansApi.deleteCompletion(plan.id, itemId, completionDate);
       setCompletionStates((current) => ({ ...current, [stateKey]: false }));
-      writeTemporaryCompletionState(stateKey, false);
     } catch (cause) {
       handleApiError(cause);
     } finally {
@@ -576,9 +614,11 @@ export const StudyPlannerPage: React.FC = () => {
                     />
                   </label>
                 </div>
-                <p className="mb-4 rounded-xl bg-primary-subtle/30 px-3 py-2 text-xs text-muted-purple">
-                  Completion status is temporarily cached in this browser to survive refreshes. The backend does not yet provide completion records for restoring changes made elsewhere.
-                </p>
+                {loadingCompletions && (
+                  <p role="status" className="mb-4 text-sm text-muted-purple">
+                    Loading completion status...
+                  </p>
+                )}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {persistedSchedule.map((item) => {
                     const stateKey = `${plan.id}:${item.id}:${completionDate}`;
@@ -621,7 +661,7 @@ export const StudyPlannerPage: React.FC = () => {
                           variant={isCompleted ? 'secondary' : 'outline'}
                           size="sm"
                           className="mt-3 w-full"
-                          disabled={isBusy || !completionDate}
+                          disabled={isBusy || loadingCompletions || !completionDate}
                           onClick={() => void saveCompletion(item.id)}
                         >
                           <CheckCircle2 className="h-3.5 w-3.5" />
@@ -632,7 +672,7 @@ export const StudyPlannerPage: React.FC = () => {
                             variant="ghost"
                             size="sm"
                             className="mt-1 w-full"
-                            disabled={isBusy}
+                            disabled={isBusy || loadingCompletions}
                             onClick={() => void deleteCompletion(item.id)}
                           >
                             <RotateCcw className="h-3.5 w-3.5" />

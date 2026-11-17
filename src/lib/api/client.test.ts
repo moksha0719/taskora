@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STUDY_PLANS_UPDATED_EVENT, studyPlansApi } from './client';
-import type { ApiStudyPlan, StudyPlanInput } from '../../types';
+import type { ApiStudyPlan, StudyCompletion, StudyPlanInput } from '../../types';
 
 const planInput: StudyPlanInput = {
   title: 'Calendar refresh test',
@@ -74,5 +74,28 @@ describe('study plan calendar refresh notifications', () => {
 
     await expect(studyPlansApi.createPlan(planInput)).rejects.toThrow('Request failed');
     expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it('loads completion history for the requested civil-date range', async () => {
+    const completion: StudyCompletion = {
+      id: '550e8400-e29b-41d4-a716-446655440002',
+      scheduleItemId: '550e8400-e29b-41d4-a716-446655440003',
+      occurrenceDate: '2026-11-17',
+      completedAt: '2026-11-17T12:00:00.000Z',
+      actualDurationMinutes: 45,
+    };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ completions: [completion] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(studyPlansApi.getCompletions(plan.id, '2026-11-17', '2026-11-18'))
+      .resolves.toEqual([completion]);
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(
+      `/api/study-plans/${plan.id}/completions?from=2026-11-17&to=2026-11-18`
+    );
+    expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
   });
 });
