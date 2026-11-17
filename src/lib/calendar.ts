@@ -5,12 +5,21 @@ export interface CalendarEvent {
   title: string;
   date: string;
   type: 'task' | 'study';
+  timeZone?: string;
   time?: string;
   endTime?: string;
   details?: string;
 }
 
 const WEEKDAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
+const DEFAULT_STUDY_TIME_ZONE = 'Asia/Colombo';
+
+export function getStudyTimeZoneSummary(plans: ApiStudyPlan[]): string {
+  const timeZones = Array.from(new Set(plans.map((plan) => plan.timeZone)));
+  if (timeZones.length === 0) return DEFAULT_STUDY_TIME_ZONE;
+  if (timeZones.length === 1) return timeZones[0];
+  return "each plan's configured time zone";
+}
 
 export function toDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -74,6 +83,7 @@ export function getCalendarEvents(
             title: subject.name,
             date: dateKey,
             type: 'study',
+            timeZone: plan.timeZone,
             time: formatCalendarTime(item.startMinuteOfDay),
             endTime: formatCalendarTime(item.startMinuteOfDay + item.durationMinutes),
             details: [plan.title, ...item.topics].join(' · '),

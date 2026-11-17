@@ -39,12 +39,12 @@ describe.skipIf(!BACKEND_UP)('SRS Acceptance — Phase 06 Study Planner', () => 
   });
 
   it('TC07: create plan and generate availability-based schedule', async () => {
-    const formatDate = (d) =>
+    const formatDate = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const start = new Date();
     const end = new Date(start);
     end.setDate(end.getDate() + 30);
-    const studyDays = ['MON', 'TUE', 'WED', 'THU'];
+    const studyDays: StudyDayCode[] = ['MON', 'TUE', 'WED', 'THU'];
     const plan = await studyPlansApi.createPlan({
       title: 'Acceptance study plan',
       startDate: formatDate(start),
@@ -77,26 +77,27 @@ describe.skipIf(!BACKEND_UP)('SRS Acceptance — Phase 06 Study Planner', () => 
   });
 
   it('TC07b: reject schedule generation without availability windows', async () => {
-    const formatDate = (d) =>
+    const formatDate = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const start = new Date();
     const end = new Date(start);
     end.setDate(end.getDate() + 14);
+    const studyDays: StudyDayCode[] = ['MON', 'TUE', 'WED', 'THU'];
     const plan = await studyPlansApi.createPlan({
       title: 'Reject-case plan',
       startDate: formatDate(start),
       endDate: formatDate(end),
       timeZone: 'Asia/Colombo',
-      weeklyTargetMinutes: 300,
-      studyDaysPerWeek: 2,
-      subjects: [{ name: 'Test', code: 'T', targetMinutesPerWeek: 300 }],
+      weeklyTargetMinutes: 600,
+      studyDaysPerWeek: 4,
+      subjects: [{ name: 'Test', code: 'T', targetMinutesPerWeek: 600 }],
     });
     try {
       await expect(
         studyPlansApi.generateSchedule({
           plan: { weeklyTargetMinutes: plan.weeklyTargetMinutes, studyDaysPerWeek: plan.studyDaysPerWeek },
           subjects: plan.subjects.map(({ id, name, targetMinutesPerWeek }) => ({ id, name, targetMinutesPerWeek })),
-          studyDays: ['MON', 'TUE'],
+          studyDays,
           scheduleSettings: { availabilityWindows: [] },
         })
       ).rejects.toThrow();
