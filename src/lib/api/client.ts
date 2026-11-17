@@ -39,6 +39,11 @@ const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'taskora_auth_token';
+export const STUDY_PLANS_UPDATED_EVENT = 'taskora:study-plans-updated';
+
+function notifyStudyPlansUpdated(): void {
+  window.dispatchEvent(new Event(STUDY_PLANS_UPDATED_EVENT));
+}
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -316,6 +321,7 @@ export const studyPlansApi = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+    notifyStudyPlansUpdated();
     return studyPlan;
   },
 
@@ -324,11 +330,13 @@ export const studyPlansApi = {
       `/api/study-plans/${encodeURIComponent(id)}`,
       { method: 'PUT', body: JSON.stringify(input) }
     );
+    notifyStudyPlansUpdated();
     return studyPlan;
   },
 
   async deletePlan(id: string): Promise<void> {
     await requestApi<void>(`/api/study-plans/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    notifyStudyPlansUpdated();
   },
 
   async generateSchedule(input: StudySchedulePreviewInput): Promise<StudySchedulePreviewItem[]> {

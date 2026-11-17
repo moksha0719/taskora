@@ -3,11 +3,12 @@ import { Card } from '../common/Card';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils';
-import { studyPlansApi, tasksApi } from '../../lib/api/client';
+import { studyPlansApi, tasksApi, STUDY_PLANS_UPDATED_EVENT } from '../../lib/api/client';
 import {
   addCalendarDays,
   getCalendarEvents,
   getCalendarGridDates,
+  getStudyTimeZoneSummary,
   groupCalendarEvents,
   toDateKey,
 } from '../../lib/calendar';
@@ -54,6 +55,12 @@ export const SemesterCalendarWidget: React.FC = () => {
     };
   }, [reloadKey]);
 
+  useEffect(() => {
+    const refreshCalendar = () => setReloadKey((key) => key + 1);
+    window.addEventListener(STUDY_PLANS_UPDATED_EVENT, refreshCalendar);
+    return () => window.removeEventListener(STUDY_PLANS_UPDATED_EVENT, refreshCalendar);
+  }, []);
+
   const cells = useMemo(
     () => getCalendarGridDates(currentMonth),
     [currentMonth]
@@ -65,6 +72,10 @@ export const SemesterCalendarWidget: React.FC = () => {
     [tasks, studyPlans, gridStart, gridEnd]
   );
   const eventsByDate = useMemo(() => groupCalendarEvents(events), [events]);
+  const studyTimeZoneSummary = useMemo(
+    () => getStudyTimeZoneSummary(studyPlans),
+    [studyPlans]
+  );
 
   const monthLabel = new Intl.DateTimeFormat(undefined, {
     month: 'long',
@@ -238,6 +249,7 @@ export const SemesterCalendarWidget: React.FC = () => {
               <span className={event.type === 'study' ? 'text-orange-500' : 'text-primary'}>
                 {event.time ? `${event.time} ` : ''}
               </span>
+              {event.timeZone ? `${event.timeZone} ` : ''}
               {event.title}
             </p>
           ))}
@@ -251,7 +263,7 @@ export const SemesterCalendarWidget: React.FC = () => {
             </span>
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[#F97316]" />
-              Study · Asia/Colombo
+              Study · {studyTimeZoneSummary}
             </span>
           </div>
         </div>

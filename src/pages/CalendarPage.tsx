@@ -3,12 +3,13 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock } from 'lucide-react';
-import { tasksApi, studyPlansApi } from '../lib/api/client';
+import { tasksApi, studyPlansApi, STUDY_PLANS_UPDATED_EVENT } from '../lib/api/client';
 import { ApiStudyPlan, Task } from '../types';
 import {
   addCalendarDays,
   getCalendarEvents,
   getCalendarGridDates,
+  getStudyTimeZoneSummary,
   groupCalendarEvents,
   toDateKey,
 } from '../lib/calendar';
@@ -53,6 +54,12 @@ export const CalendarPage: React.FC = () => {
     };
   }, [reloadKey]);
 
+  useEffect(() => {
+    const refreshCalendar = () => setReloadKey((key) => key + 1);
+    window.addEventListener(STUDY_PLANS_UPDATED_EVENT, refreshCalendar);
+    return () => window.removeEventListener(STUDY_PLANS_UPDATED_EVENT, refreshCalendar);
+  }, []);
+
   const monthDates = useMemo(() => getCalendarGridDates(currentMonth), [currentMonth]);
   const visibleDates = useMemo(() => {
     if (currentView === 'month') return monthDates;
@@ -67,6 +74,10 @@ export const CalendarPage: React.FC = () => {
     [tasks, studyPlans, firstVisibleDate, lastVisibleDate]
   );
   const eventsByDate = useMemo(() => groupCalendarEvents(events), [events]);
+  const studyTimeZoneSummary = useMemo(
+    () => getStudyTimeZoneSummary(studyPlans),
+    [studyPlans]
+  );
   const selectedDateKey = toDateKey(selectedDate);
   const selectedDayEvents = eventsByDate.get(selectedDateKey) || [];
   const monthLabel = new Intl.DateTimeFormat(undefined, {
@@ -106,7 +117,7 @@ export const CalendarPage: React.FC = () => {
             Schedule & Calendar
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
-            Study session times are shown in Asia/Colombo.
+            Study session times are shown in {studyTimeZoneSummary}.
           </p>
         </div>
 
@@ -252,7 +263,9 @@ export const CalendarPage: React.FC = () => {
                             : 'bg-soft-pink text-soft-pink-text dark:bg-pink-950/60 dark:text-pink-300'
                         )}
                       >
-                        {calendarEvent.time ? `${calendarEvent.time} ` : ''}{calendarEvent.title}
+                        {calendarEvent.time ? `${calendarEvent.time} ` : ''}
+                        {calendarEvent.timeZone ? `${calendarEvent.timeZone} ` : ''}
+                        {calendarEvent.title}
                       </div>
                     ))}
                     {dayEvents.length > (currentView === 'month' ? 2 : 6) && (
@@ -312,6 +325,7 @@ export const CalendarPage: React.FC = () => {
                     {calendarEvent.time
                       ? `${calendarEvent.time}${calendarEvent.endTime ? ` – ${calendarEvent.endTime}` : ''}`
                       : 'Due today'}
+                    {calendarEvent.timeZone ? ` · ${calendarEvent.timeZone}` : ''}
                   </span>
                   <Badge variant={calendarEvent.type === 'study' ? 'mint' : 'pink'}>
                     {calendarEvent.type === 'study' ? 'Study session' : 'Task'}
