@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STUDY_PLANS_UPDATED_EVENT, studyPlansApi } from './client';
-import type { ApiStudyPlan, StudyCompletion, StudyPlanInput } from '../../types';
+import type {
+  ApiStudyPlan,
+  StudyCompletion,
+  StudyPlanInput,
+  StudySchedulePreviewItem,
+} from '../../types';
 
 const planInput: StudyPlanInput = {
   title: 'Calendar refresh test',
@@ -97,5 +102,39 @@ describe('study plan calendar refresh notifications', () => {
       `/api/study-plans/${plan.id}/completions?from=2026-11-17&to=2026-11-18`
     );
     expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
+  });
+
+  it('saves a generated schedule to its plan and notifies calendar views', async () => {
+    const schedule: StudySchedulePreviewItem[] = [{
+      subjectId: '550e8400-e29b-41d4-a716-446655440004',
+      subjectName: 'Mathematics',
+      dayOfWeek: 'MON',
+      startMinuteOfDay: 540,
+      durationMinutes: 60,
+      kind: 'STUDY',
+    }];
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ studyPlan: plan }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(studyPlansApi.saveSchedule(plan.id, schedule)).resolves.toEqual(plan);
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(`/api/study-plans/${plan.id}/schedule`);
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body as string)).toEqual({ schedule });
+    expect(onUpdated).toHaveBeenCalledOnce();
+  });
+
+  it('reports a useful error when an API route returns an HTML error page', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('<!doctype html><title>Not Found</title>', {
+      status: 404,
+      headers: { 'Content-Type': 'text/html' },
+    }));
+
+    await expect(studyPlansApi.getPlans()).rejects.toThrow(
+      'The API returned a non-JSON error response (HTTP 404). Check VITE_API_BASE_URL and verify that the backend endpoint is available.'
+    );
   });
 });

@@ -53,6 +53,10 @@ npm run db:validate
 npm run db:deploy
 ```
 
+The `predev` lifecycle regenerates Prisma Client from the current schema before
+the development server starts. This keeps persistent Docker dependency volumes
+in sync when the Prisma schema changes.
+
 `db:deploy` applies pending migrations; it does not reset the database. Start
 the native development server with:
 

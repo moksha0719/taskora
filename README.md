@@ -4,7 +4,7 @@
 
 Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-> **Project status:** The frontend uses the Phase 06 APIs for registration, login, study-plan CRUD, calendar data, and schedule completions, including restoring completion history from the backend. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Generated previews can be saved through the backend API, but the frontend does not yet save previews or activate plans.
+> **Project status:** The frontend uses the Phase 06 APIs for registration, login, study-plan CRUD, calendar data, schedule persistence, and completion history. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Plans cannot be activated through the current API.
 
 ## Current features and prototype scope
 
@@ -16,7 +16,7 @@ The existing frontend describes these screens and interactions:
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
 | **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. The backend supports persistent conversations and task proposals with explicit approval/rejection; the frontend flow is not integrated. |
 | **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner` | Subject workload and weekly timetable UI. The backend supports plan CRUD, deterministic schedule preview/persistence, activation/deactivation, and completion history; the UI is not integrated. |
+| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, calendar data, schedule previews and persistence, and completion actions/history. The backend also supports plan activation/deactivation, but the frontend does not expose those operations. |
 | **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
 | **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
@@ -51,11 +51,11 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Frontend | React 18, TypeScript, Vite, React Router | Present |
 | Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
 | Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
-| Frontend data layer | Typed mock API and browser `localStorage` | Present; not connected to Express |
+| Frontend data layer | Typed API client plus mock APIs and browser `localStorage` | Authentication and Phase 06 study planning use Express; other prototype features remain mocked |
 | Backend | Node.js, Express, CORS, dotenv | Authenticated API routes present |
 | Database | PostgreSQL | Prisma-backed schema and migrations present |
 | ORM | Prisma | Configured in `backend/` |
-| Authentication | bcrypt password hashing and JWT | Backend endpoints present; frontend sign-in remains a demo |
+| Authentication | bcrypt password hashing and JWT | Backend-backed registration and login |
 | AI integration | Google Gemini through the backend | Assistant, persistent conversation/proposal, and Brain Dump endpoints present; frontend proposal flow remains local |
 
 ## Architecture
