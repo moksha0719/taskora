@@ -46,6 +46,30 @@ function validatePlanId(req, res) {
     return true;
 }
 
+function dateOnly(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    return date.toISOString().slice(0, 10);
+}
+
+function serializeStudyPlan(studyPlan) {
+    if (!studyPlan) {
+        return studyPlan;
+    }
+
+    return {
+        ...studyPlan,
+        ...(studyPlan.startDate == null ? {} : { startDate: dateOnly(studyPlan.startDate) }),
+        ...(studyPlan.endDate == null ? {} : { endDate: dateOnly(studyPlan.endDate) })
+    };
+}
+
+function serializeCompletion(completion) {
+    return {
+        ...completion,
+        occurrenceDate: dateOnly(completion.occurrenceDate)
+    };
+}
+
 function validateSchedulePreviewRequest(req, res) {
     const body = req.body;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -172,7 +196,7 @@ function createStudyPlanController(
 
         try {
             const studyPlan = await studyPlanService.createStudyPlan(req.user.id, req.body);
-            return res.status(201).json({ studyPlan });
+            return res.status(201).json({ studyPlan: serializeStudyPlan(studyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
         }
@@ -181,7 +205,7 @@ function createStudyPlanController(
     async function list(req, res) {
         try {
             const studyPlans = await studyPlanService.listStudyPlans(req.user.id);
-            return res.json({ studyPlans });
+            return res.json({ studyPlans: studyPlans.map(serializeStudyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
         }
@@ -190,7 +214,7 @@ function createStudyPlanController(
     async function getActive(req, res) {
         try {
             const studyPlan = await studyPlanService.getActiveStudyPlan(req.user.id);
-            return res.json({ studyPlan });
+            return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
         }
@@ -206,7 +230,7 @@ function createStudyPlanController(
             if (!studyPlan) {
                 return res.status(404).json({ error: "Study plan not found" });
             }
-            return res.json({ studyPlan });
+            return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
         }
@@ -226,7 +250,7 @@ function createStudyPlanController(
             if (!studyPlan) {
                 return res.status(404).json({ error: "Study plan not found" });
             }
-            return res.json({ studyPlan });
+            return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
         }
@@ -243,7 +267,7 @@ function createStudyPlanController(
                 req.params.id,
                 req.body
             );
-            return res.json({ studyPlan });
+            return res.json({ studyPlan: serializeStudyPlan(studyPlan) });
         } catch (error) {
             return sendServiceError(error, res);
         }
@@ -296,7 +320,7 @@ function createStudyPlanController(
                     occurrenceDate: req.params.date
                 }
             );
-            return res.json({ completion });
+            return res.json({ completion: serializeCompletion(completion) });
         } catch (error) {
             return sendCompletionError(error, res);
         }
@@ -317,7 +341,32 @@ function createStudyPlanController(
                 req.params.itemId,
                 req.params.date
             );
-            return res.json({ completion, deleted: true });
+            return res.json({ completion: serializeCompletion(completion), deleted: true });
+        } catch (error) {
+            return sendCompletionError(error, res);
+        }
+    }
+
+    async function listScheduleCompletions(req, res) {
+        if (!UUID_PATTERN.test(req.params.planId)) {
+            return res.status(400).json({ error: "Invalid study plan ID" });
+        }
+
+        const unsupportedQuery = Object.keys(req.query).find(
+            (field) => field !== "from" && field !== "to"
+        );
+        if (unsupportedQuery) {
+            return res.status(400).json({ error: `Unsupported query parameter: ${unsupportedQuery}` });
+        }
+
+        try {
+            const completions = await scheduleCompletionService.listScheduleCompletions(
+                req.user.id,
+                req.params.planId,
+                req.query.from,
+                req.query.to
+            );
+            return res.json({ completions: completions.map(serializeCompletion) });
         } catch (error) {
             return sendCompletionError(error, res);
         }
@@ -332,6 +381,7 @@ function createStudyPlanController(
         saveSchedule,
         remove,
         generateSchedulePreview,
+        listScheduleCompletions,
         upsertScheduleCompletion,
         deleteScheduleCompletion
     };

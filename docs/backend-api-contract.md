@@ -270,8 +270,10 @@ malformed or violates the described output schema, the endpoint returns
 Study Planner endpoints cover plan CRUD, stateless schedule preview, saving a
 schedule, and schedule completion. Notifications are read and mutated through
 owner-scoped authenticated endpoints; there is no public notification-create
-route. The detailed request fields, response examples, validation rules,
-timezone behavior, and error codes are documented in
+route. Study plan dates and completion occurrence dates are civil dates
+formatted as `YYYY-MM-DD`; recurring study schedules use the plan's IANA
+timezone, defaulting to `Asia/Colombo`. The detailed request fields, response
+examples, validation rules, timezone behavior, and error codes are documented in
 [Phase 06 Study Planner API Contract](./phase06-api-contract.md).
 
 ## Frontend integration status

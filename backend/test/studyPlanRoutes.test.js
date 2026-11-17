@@ -5,7 +5,10 @@ const jwt = require("jsonwebtoken");
 const createApp = require("../src/app");
 const { JWT_AUDIENCE, JWT_ISSUER } = require("../src/config/auth");
 const { StudyPlanServiceError } = require("../src/services/studyPlanService");
-const { ScheduleCompletionServiceError } = require("../src/services/scheduleCompletionService");
+const {
+    createScheduleCompletionService,
+    ScheduleCompletionServiceError
+} = require("../src/services/scheduleCompletionService");
 const {
     StudyScheduleError,
     generateStudySchedulePreview
@@ -115,7 +118,12 @@ test("POST creates a plan for the authenticated caller and returns 201", async (
     const service = createMockService({
         createStudyPlan: async (...args) => {
             received = args;
-            return { id: PLAN_ID, status: "DRAFT" };
+            return {
+                id: PLAN_ID,
+                status: "DRAFT",
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-12-20T00:00:00.000Z")
+            };
         }
     });
 
@@ -132,7 +140,12 @@ test("POST creates a plan for the authenticated caller and returns 201", async (
         const created = await request("/api/study-plans", jsonRequest("POST", VALID_INPUT));
         assert.equal(created.status, 201);
         assert.deepEqual(await created.json(), {
-            studyPlan: { id: PLAN_ID, status: "DRAFT" }
+            studyPlan: {
+                id: PLAN_ID,
+                status: "DRAFT",
+                startDate: "2026-11-16",
+                endDate: "2026-12-20"
+            }
         });
         assert.deepEqual(received, [USER_A, VALID_INPUT]);
     });
@@ -143,7 +156,11 @@ test("GET list and active endpoints return the expected shapes for the caller", 
     const service = createMockService({
         listStudyPlans: async (userId) => {
             calls.push(["list", userId]);
-            return [{ id: PLAN_ID }];
+            return [{
+                id: PLAN_ID,
+                startDate: new Date("2026-11-16T00:00:00.000Z"),
+                endDate: new Date("2026-12-20T00:00:00.000Z")
+            }];
         },
         getActiveStudyPlan: async (userId) => {
             calls.push(["active", userId]);
@@ -154,7 +171,13 @@ test("GET list and active endpoints return the expected shapes for the caller", 
     await withServer(service, async (request) => {
         const list = await request("/api/study-plans", authRequest());
         assert.equal(list.status, 200);
-        assert.deepEqual(await list.json(), { studyPlans: [{ id: PLAN_ID }] });
+        assert.deepEqual(await list.json(), {
+            studyPlans: [{
+                id: PLAN_ID,
+                startDate: "2026-11-16",
+                endDate: "2026-12-20"
+            }]
+        });
 
         const active = await request("/api/study-plans/active", authRequest());
         assert.equal(active.status, 200);
@@ -277,6 +300,7 @@ test("all endpoints require authentication", async () => {
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify(SCHEDULE_PREVIEW_INPUT)
             }),
+            request(`/api/study-plans/${PLAN_ID}/completions?from=2026-11-16&to=2026-11-18`),
             request("/api/study-plans/not-a-uuid/schedule-items/not-a-uuid/completions/not-a-date", {
                 method: "PUT",
                 body: JSON.stringify({})
@@ -288,9 +312,81 @@ test("all endpoints require authentication", async () => {
         const responses = await Promise.all(requests);
         assert.deepEqual(
             responses.map((response) => response.status),
-            [401, 401, 401, 401, 401, 401, 401, 401, 401, 401]
+            [401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401]
         );
     });
+});
+
+test("GET completions returns owner-scoped records with date-only occurrence dates", async () => {
+    const occurrenceDate = new Date("2026-11-16T00:00:00.000Z");
+    const completion = {
+        id: "completion-id",
+        scheduleItemId: SCHEDULE_ITEM_ID,
+        occurrenceDate,
+        completedAt: new Date("2026-11-16T12:00:00.000Z"),
+        actualDurationMinutes: 45
+    };
+    const planLookups = [];
+    let completionQuery;
+    let returnNoCompletions = false;
+    const completionService = createScheduleCompletionService({
+        prismaClient: {
+            studyPlan: {
+                findFirst: async ({ where }) => {
+                    planLookups.push(where);
+                    return where.userId === USER_A ? { id: PLAN_ID } : null;
+                }
+            },
+            sessionCompletion: {
+                findMany: async (args) => {
+                    completionQuery = args;
+                    return returnNoCompletions ? [] : [completion];
+                }
+            }
+        }
+    });
+
+    await withServer(createMockService(), async (request) => {
+        const path = `/api/study-plans/${PLAN_ID}/completions?from=2026-11-16&to=2026-11-18`;
+        const response = await request(path, authRequest());
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), {
+            completions: [{
+                id: "completion-id",
+                scheduleItemId: SCHEDULE_ITEM_ID,
+                occurrenceDate: "2026-11-16",
+                completedAt: "2026-11-16T12:00:00.000Z",
+                actualDurationMinutes: 45
+            }]
+        });
+        assert.deepEqual(completionQuery.where.occurrenceDate, {
+            gte: new Date("2026-11-16T00:00:00.000Z"),
+            lt: new Date("2026-11-18T00:00:00.000Z")
+        });
+
+        const otherUser = await request(path, authRequest(USER_B));
+        assert.equal(otherUser.status, 404);
+        assert.deepEqual(await otherUser.json(), { error: "Study plan not found" });
+        assert.equal(planLookups[1].userId, USER_B);
+
+        returnNoCompletions = true;
+        const empty = await request(path, authRequest());
+        assert.equal(empty.status, 200);
+        assert.deepEqual(await empty.json(), { completions: [] });
+
+        const invalidDate = await request(
+            `/api/study-plans/${PLAN_ID}/completions?from=2026-02-30&to=2026-03-01`,
+            authRequest()
+        );
+        assert.equal(invalidDate.status, 400);
+
+        const reversedRange = await request(
+            `/api/study-plans/${PLAN_ID}/completions?from=2026-11-18&to=2026-11-16`,
+            authRequest()
+        );
+        assert.equal(reversedRange.status, 400);
+        assert.equal(planLookups.length, 3);
+    }, undefined, undefined, completionService);
 });
 
 test("completion PUT creates or updates and DELETE returns the deleted completion", async () => {
@@ -302,6 +398,7 @@ test("completion PUT creates or updates and DELETE returns the deleted completio
                 id: "completion-id",
                 scheduleItemId: args[2],
                 occurrenceDate: new Date(`${args[3].occurrenceDate}T00:00:00.000Z`),
+                completedAt: new Date("2026-11-16T12:00:00.000Z"),
                 actualDurationMinutes: args[3].actualDurationMinutes ?? null
             };
         },
@@ -322,7 +419,8 @@ test("completion PUT creates or updates and DELETE returns the deleted completio
             completion: {
                 id: "completion-id",
                 scheduleItemId: SCHEDULE_ITEM_ID,
-                occurrenceDate: "2026-11-16T00:00:00.000Z",
+                occurrenceDate: "2026-11-16",
+                completedAt: "2026-11-16T12:00:00.000Z",
                 actualDurationMinutes: 35
             }
         });
@@ -339,7 +437,7 @@ test("completion PUT creates or updates and DELETE returns the deleted completio
         assert.deepEqual(await deleteResponse.json(), {
             completion: {
                 scheduleItemId: SCHEDULE_ITEM_ID,
-                occurrenceDate: "2026-11-16T00:00:00.000Z"
+                occurrenceDate: "2026-11-16"
             },
             deleted: true
         });
