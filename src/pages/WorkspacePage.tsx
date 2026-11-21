@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
-import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { notesApi } from '../lib/api/client';
 import { StudyNote } from '../types';
@@ -25,6 +24,10 @@ import { cn } from '../lib/utils';
 
 export const WorkspacePage: React.FC = () => {
   const [notes, setNotes] = useState<StudyNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState('');
   const [activeSubject, setActiveSubject] = useState<string>('all');
   const [selectedNote, setSelectedNote] = useState<StudyNote | null>(null);
 
@@ -34,10 +37,18 @@ export const WorkspacePage: React.FC = () => {
   const [editIsPrivate, setEditIsPrivate] = useState(true);
 
   const fetchNotes = async () => {
-    const data = await notesApi.getNotes();
-    setNotes(data);
-    if (data.length > 0 && !selectedNote) {
-      selectNote(data[0]);
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await notesApi.getNotes();
+      setNotes(data);
+      if (data.length > 0 && !selectedNote) {
+        selectNote(data[0]);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load notes.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -50,44 +61,72 @@ export const WorkspacePage: React.FC = () => {
     setEditTitle(note.title);
     setEditContent(note.content);
     setEditIsPrivate(note.isPrivate);
+    setShareLink('');
+    setCopyStatus(null);
   };
 
   const handleSaveNote = async () => {
     if (!selectedNote || !editTitle.trim()) return;
 
-    const saved = await notesApi.saveNote({
-      ...selectedNote,
-      title: editTitle,
-      content: editContent,
-      isPrivate: editIsPrivate,
-    });
-
-    setNotes((prev) => prev.map((n) => (n.id === saved.id ? saved : n)));
-    setSelectedNote(saved);
-    alert('Note saved successfully!');
+    setError(null);
+    try {
+      const saved = await notesApi.saveNote({
+        ...selectedNote,
+        title: editTitle,
+        content: editContent,
+        isPrivate: editIsPrivate,
+      });
+      setNotes((prev) => prev.map((n) => (n.id === saved.id ? saved : n)));
+      setSelectedNote(saved);
+      setShareLink('');
+      setCopyStatus(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save this note.');
+    }
   };
 
   const handleCreateNewNote = async () => {
-    const newNote = await notesApi.saveNote({
-      title: 'Untitled Study Note',
-      subjectId: activeSubject === 'all' ? 'sub_cs301' : activeSubject,
-      subjectName: activeSubject === 'all' ? 'Distributed Systems' : activeSubject,
-      content: 'Start writing your lecture summary or revision notes here...',
-      tags: ['Revision'],
-      isPrivate: true, // Default private per FR-10
-    });
+    setError(null);
+    try {
+      const newNote = await notesApi.saveNote({
+        title: 'Untitled Study Note',
+        subjectId: activeSubject === 'all' ? 'sub_cs301' : activeSubject,
+        subjectName: activeSubject === 'all' ? 'Distributed Systems' : activeSubject,
+        content: 'Start writing your lecture summary or revision notes here...',
+        tags: ['Revision'],
+        isPrivate: true,
+      });
+      setNotes((prev) => [newNote, ...prev]);
+      selectNote(newNote);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to create a note.');
+    }
+  };
 
-    setNotes([newNote, ...notes]);
-    selectNote(newNote);
+  const handleCopyShareLink = async () => {
+    if (!selectedNote?.shareCode) return;
+    const link = `${window.location.origin}/shared-notes/${selectedNote.shareCode}`;
+    setShareLink(link);
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopyStatus('Share link copied.');
+    } catch {
+      setCopyStatus('Clipboard access is unavailable. Select and copy the link below.');
+    }
   };
 
   const handleDeleteNote = async (id: string) => {
     if (confirm('Delete this note?')) {
-      await notesApi.deleteNote(id);
-      const remaining = notes.filter((n) => n.id !== id);
-      setNotes(remaining);
-      if (remaining.length > 0) selectNote(remaining[0]);
-      else setSelectedNote(null);
+      setError(null);
+      try {
+        await notesApi.deleteNote(id);
+        const remaining = notes.filter((n) => n.id !== id);
+        setNotes(remaining);
+        if (remaining.length > 0) selectNote(remaining[0]);
+        else setSelectedNote(null);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Unable to delete this note.');
+      }
     }
   };
 
@@ -107,14 +146,19 @@ export const WorkspacePage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>Study Workspace & Notes</span>
-            <Badge variant="primary">FR-10 Private by Default</Badge>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Create structured subject notes. Notes remain completely private unless you toggle explicit sharing.
           </p>
         </div>
+
+        {error && <Card role="alert" className="text-sm text-rose-600">{error}</Card>}
+        {loading && <Card className="text-sm text-muted-purple">Loading notes...</Card>}
+        {!loading && !error && notes.length === 0 && (
+          <Card className="text-sm text-muted-purple">No notes yet. Create a note to start your workspace.</Card>
+        )}
 
         <Button variant="primary" size="sm" pill onClick={handleCreateNewNote}>
           <Plus className="w-4 h-4" />
@@ -226,7 +270,6 @@ export const WorkspacePage: React.FC = () => {
                   placeholder="Note Title"
                 />
 
-                {/* Explicit Share Toggle (FR-10) */}
                 <button
                   type="button"
                   onClick={() => setEditIsPrivate(!editIsPrivate)}
@@ -297,19 +340,40 @@ export const WorkspacePage: React.FC = () => {
 
               {/* Bottom Actions */}
               <div className="flex items-center justify-between pt-4 border-t border-subtle">
-                <button
-                  onClick={() => handleDeleteNote(selectedNote.id)}
-                  className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 text-xs flex items-center gap-1 font-semibold"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleDeleteNote(selectedNote.id)}
+                    className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 text-xs flex items-center gap-1 font-semibold"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete</span>
+                  </button>
+                  {!editIsPrivate && selectedNote.shareCode && (
+                    <button
+                      onClick={handleCopyShareLink}
+                      className="p-2 rounded-xl text-primary hover:bg-primary-subtle text-xs flex items-center gap-1 font-semibold"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>Copy shared link</span>
+                    </button>
+                  )}
+                  {copyStatus && <span role="status" className="text-[11px] text-muted-purple">{copyStatus}</span>}
+                </div>
 
                 <Button size="sm" pill onClick={handleSaveNote}>
                   <Save className="w-4 h-4" />
                   <span>Save Changes</span>
                 </Button>
               </div>
+              {shareLink && selectedNote.shareCode && (
+                <input
+                  aria-label="Public note share link"
+                  readOnly
+                  value={shareLink}
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="w-full rounded-xl border border-subtle bg-white px-3 py-2 text-xs text-muted-purple"
+                />
+              )}
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-xs text-muted-purple">

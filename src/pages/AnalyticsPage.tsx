@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { analyticsApi } from '../lib/api/client';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -14,36 +13,69 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { CheckCircle2, Clock, Flame, TrendingUp, Calendar, Trophy } from 'lucide-react';
-
-const WEEK_DATA = [
-  { day: 'Mon', focusHours: 2.5, tasksDone: 4 },
-  { day: 'Tue', focusHours: 3.2, tasksDone: 6 },
-  { day: 'Wed', focusHours: 4.0, tasksDone: 7 },
-  { day: 'Thu', focusHours: 2.0, tasksDone: 3 },
-  { day: 'Fri', focusHours: 4.5, tasksDone: 8 },
-  { day: 'Sat', focusHours: 3.0, tasksDone: 5 },
-  { day: 'Sun', focusHours: 3.8, tasksDone: 6 },
-];
-
-const SUBJECT_DISTRIBUTION = [
-  { name: 'Distributed Systems', hours: 14, color: '#9885E8' },
-  { name: 'Interaction Design', hours: 9, color: '#C7B9F5' },
-  { name: 'Discrete Math', hours: 7, color: '#FEF3D6' },
-  { name: 'General Reading', hours: 4, color: '#DDF3E9' },
-];
+import { BookOpen, CheckCircle2, Clock, FileText, Flame } from 'lucide-react';
 
 export const AnalyticsPage: React.FC = () => {
   const [period, setPeriod] = useState<'7d' | '30d' | 'semester'>('7d');
+  const [summary, setSummary] = useState({
+    taskCounts: {} as Record<string, number>,
+    focusMinutes: 0,
+    xpEarned: 0,
+    habitCheckIns: 0,
+    noteCount: 0,
+    focusByDay: {} as Record<string, number>,
+    subjectDistribution: {} as Record<string, number>,
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    analyticsApi.getAnalytics(period).then((data) => {
+      if (active) setSummary(data);
+    }).catch((cause: unknown) => {
+      if (active) setError(cause instanceof Error ? cause.message : 'Unable to load analytics.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [period]);
+
+  const hasAnalyticsData =
+    Object.values(summary.taskCounts).some((count) => count > 0) ||
+    summary.focusMinutes > 0 ||
+    summary.habitCheckIns > 0 ||
+    summary.noteCount > 0 ||
+    summary.xpEarned > 0 ||
+    Object.keys(summary.focusByDay).length > 0 ||
+    Object.keys(summary.subjectDistribution).length > 0;
+
+  const weekData = Object.entries(summary.focusByDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, minutes]) => ({
+      day: day.slice(5),
+      focusHours: Number((minutes / 60).toFixed(1)),
+      tasksDone: summary.taskCounts.COMPLETED || 0,
+    }));
+  const subjectDistribution = Object.entries(summary.subjectDistribution).map(
+    ([name, minutes], index) => ({
+      name,
+      hours: Number((minutes / 60).toFixed(1)),
+      color: ['#9885E8', '#C7B9F5', '#FEF3D6', '#DDF3E9', '#F7DDED'][index % 5],
+    })
+  );
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>Productivity Analytics</span>
-            <Badge variant="mint">FR-08 Verified</Badge>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Understand your focus rhythms, task completion rates, and subject distribution across semesters.
@@ -60,6 +92,7 @@ export const AnalyticsPage: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setPeriod(tab.id as '7d' | '30d' | 'semester')}
+              aria-pressed={period === tab.id}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 period === tab.id
                   ? 'bg-primary text-white shadow-xs'
@@ -72,8 +105,16 @@ export const AnalyticsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 4 Analytics Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {loading && <Card role="status" className="p-5 text-sm text-muted-purple">Loading analytics...</Card>}
+      {error && <Card role="alert" className="p-5 text-sm text-rose-600">{error}</Card>}
+      {!loading && !error && !hasAnalyticsData && (
+        <Card className="p-5 text-sm text-muted-purple">No analytics data is available for this period.</Card>
+      )}
+
+      {!loading && !error && hasAnalyticsData && (
+        <>
+      {/* Analytics Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         <Card className="p-5">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-primary-subtle text-primary flex items-center justify-center font-bold">
@@ -81,8 +122,8 @@ export const AnalyticsPage: React.FC = () => {
             </div>
             <div>
               <span className="text-xs text-muted-purple">Tasks Completed</span>
-              <div className="text-2xl font-bold text-deep-purple dark:text-white">39</div>
-              <span className="text-xs font-semibold text-emerald-600">+14% vs last week</span>
+              <div className="text-2xl font-bold text-deep-purple dark:text-white">{summary.taskCounts.COMPLETED || 0}</div>
+              <span className="text-xs text-muted-purple">For selected period</span>
             </div>
           </div>
         </Card>
@@ -94,8 +135,8 @@ export const AnalyticsPage: React.FC = () => {
             </div>
             <div>
               <span className="text-xs text-muted-purple">Total Focus Hours</span>
-              <div className="text-2xl font-bold text-deep-purple dark:text-white">24.2h</div>
-              <span className="text-xs font-semibold text-amber-600">Avg 3.4h / day</span>
+              <div className="text-2xl font-bold text-deep-purple dark:text-white">{(summary.focusMinutes / 60).toFixed(1)}h</div>
+              <span className="text-xs text-muted-purple">For selected period</span>
             </div>
           </div>
         </Card>
@@ -107,8 +148,21 @@ export const AnalyticsPage: React.FC = () => {
             </div>
             <div>
               <span className="text-xs text-muted-purple">Habit Consistency</span>
-              <div className="text-2xl font-bold text-deep-purple dark:text-white">92%</div>
-              <span className="text-xs font-semibold text-rose-500">14-day streak 🔥</span>
+              <div className="text-2xl font-bold text-deep-purple dark:text-white">{summary.habitCheckIns}</div>
+              <span className="text-xs text-muted-purple">Check-ins in selected period</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-soft-blue text-soft-blue-text flex items-center justify-center font-bold">
+              <BookOpen className="w-6 h-6" />
+            </div>
+            <div>
+              <span className="text-xs text-muted-purple">Notes Created</span>
+              <div className="text-2xl font-bold text-deep-purple dark:text-white">{summary.noteCount}</div>
+              <span className="text-xs text-muted-purple">For selected period</span>
             </div>
           </div>
         </Card>
@@ -116,12 +170,12 @@ export const AnalyticsPage: React.FC = () => {
         <Card className="p-5">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-mint-accent text-mint-accent-text flex items-center justify-center font-bold">
-              <Trophy className="w-6 h-6" />
+              <FileText className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-xs text-muted-purple">Scholar XP Gained</span>
-              <div className="text-2xl font-bold text-deep-purple dark:text-white">1,450</div>
-              <span className="text-xs font-semibold text-primary">Level 5 Scholar</span>
+              <span className="text-xs text-muted-purple">XP Earned</span>
+              <div className="text-2xl font-bold text-deep-purple dark:text-white">{summary.xpEarned}</div>
+              <span className="text-xs font-semibold text-primary">For selected period</span>
             </div>
           </div>
         </Card>
@@ -134,16 +188,16 @@ export const AnalyticsPage: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white">
-                Focus Time & Tasks Completion Trend
+                Daily Focus Time Trend
               </h3>
               <p className="text-xs text-muted-purple">Daily hours dedicated to deep study sessions</p>
             </div>
-            <Badge variant="primary">Weekly Sync</Badge>
+            <Badge variant="primary">{period === '7d' ? 'Last 7 days' : period === '30d' ? 'Last 30 days' : 'Semester'}</Badge>
           </div>
 
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={WEEK_DATA}>
+              <AreaChart data={weekData}>
                 <defs>
                   <linearGradient id="focusHoursGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#9885E8" stopOpacity={0.4} />
@@ -178,7 +232,7 @@ export const AnalyticsPage: React.FC = () => {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={SUBJECT_DISTRIBUTION}
+                    data={subjectDistribution}
                     dataKey="hours"
                     nameKey="name"
                     cx="50%"
@@ -187,7 +241,7 @@ export const AnalyticsPage: React.FC = () => {
                     outerRadius={75}
                     paddingAngle={4}
                   >
-                    {SUBJECT_DISTRIBUTION.map((entry, index) => (
+                    {subjectDistribution.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -198,7 +252,7 @@ export const AnalyticsPage: React.FC = () => {
           </div>
 
           <div className="space-y-2 pt-2 border-t border-subtle">
-            {SUBJECT_DISTRIBUTION.map((item) => (
+            {subjectDistribution.map((item) => (
               <div key={item.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
@@ -210,6 +264,8 @@ export const AnalyticsPage: React.FC = () => {
           </div>
         </Card>
       </div>
+        </>
+      )}
     </div>
   );
 };

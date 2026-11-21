@@ -9,9 +9,17 @@ import { Flame, Plus, Check, Calendar, Trophy, Sparkles, Trash2 } from 'lucide-r
 import confetti from 'canvas-confetti';
 import { cn } from '../lib/utils';
 
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export const HabitsPage: React.FC = () => {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   // Form fields
@@ -20,21 +28,26 @@ export const HabitsPage: React.FC = () => {
   const [category, setCategory] = useState('Study');
   const [reminderTime, setReminderTime] = useState('09:00');
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = formatLocalDate(new Date());
 
   const fetchHabits = async () => {
     setLoading(true);
-    const data = await habitsApi.getHabits();
-    setHabits(data);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      setHabits(await habitsApi.getHabits());
+    } catch (cause) {
+      setLoadError(cause instanceof Error ? cause.message : 'Unable to load your habits.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchHabits();
+    void fetchHabits();
   }, []);
 
-  const handleToggleHabit = async (habitId: string) => {
-    const updated = await habitsApi.toggleHabit(habitId, todayStr);
+  const handleToggleHabit = async (habitId: string, checked: boolean) => {
+    const updated = await habitsApi.toggleHabit(habitId, todayStr, checked);
     setHabits((prev) => prev.map((h) => (h.id === habitId ? updated : h)));
 
     if (updated.logs[todayStr]) {
@@ -52,7 +65,6 @@ export const HabitsPage: React.FC = () => {
     if (!title.trim()) return;
 
     await habitsApi.createHabit({
-      userId: 'usr_emily_01',
       title: title.trim(),
       description,
       category,
@@ -79,7 +91,7 @@ export const HabitsPage: React.FC = () => {
   const heatmapDays = Array.from({ length: 28 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (27 - i));
-    return d.toISOString().split('T')[0];
+    return formatLocalDate(d);
   });
 
   return (
@@ -87,11 +99,8 @@ export const HabitsPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>Daily Habit Tracker</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-soft-peach text-soft-peach-text font-bold">
-              FR-07 Consistency
-            </span>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Build unshakeable study and wellness habits. Every consecutive day increases your multiplier!
@@ -106,7 +115,21 @@ export const HabitsPage: React.FC = () => {
 
       {/* Habits List */}
       <div className="space-y-4">
-        {habits.map((habit) => {
+        {loading && <Card role="status" className="p-5 text-sm text-muted-purple">Loading your habits...</Card>}
+        {loadError && (
+          <Card role="alert" className="p-5 flex items-center justify-between gap-3 text-sm text-rose-600">
+            <span>{loadError}</span>
+            <button type="button" className="font-bold text-primary" onClick={() => void fetchHabits()}>
+              Retry
+            </button>
+          </Card>
+        )}
+        {!loading && !loadError && habits.length === 0 && (
+          <Card className="p-6 text-sm text-muted-purple">
+            No habits yet. Create a habit to start tracking your routine.
+          </Card>
+        )}
+        {!loading && !loadError && habits.map((habit) => {
           const isDoneToday = !!habit.logs[todayStr];
 
           return (
@@ -116,7 +139,7 @@ export const HabitsPage: React.FC = () => {
                 <div className="flex items-center gap-4 min-w-0">
                   {/* Big Check-in Circle */}
                   <button
-                    onClick={() => handleToggleHabit(habit.id)}
+                    onClick={() => handleToggleHabit(habit.id, !isDoneToday)}
                     className={cn(
                       'w-12 h-12 rounded-2xl flex items-center justify-center border transition-all active:scale-95 shadow-sm',
                       isDoneToday
@@ -176,7 +199,7 @@ export const HabitsPage: React.FC = () => {
                 <div className="flex items-center justify-between mb-2 text-[10px] text-muted-purple">
                   <span>Past 4 Weeks Heatmap:</span>
                   <span className="font-semibold text-primary">
-                    {Object.values(habit.logs).filter(Boolean).length} total completions recorded (FR-07)
+                    {Object.values(habit.logs).filter(Boolean).length} total completions recorded
                   </span>
                 </div>
 

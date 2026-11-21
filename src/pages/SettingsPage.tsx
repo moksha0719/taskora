@@ -1,19 +1,38 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
-import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { useAuth } from '../context/AuthContext';
-import { User, Lock, Bell, Shield, Download, Trash2, CheckCircle2, Save } from 'lucide-react';
+import { User, Lock, Bell, Download, Trash2, CheckCircle2, Save, Camera } from 'lucide-react';
+
+const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+const PROFILE_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export const SettingsPage: React.FC = () => {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, uploadProfilePhoto, changePassword, deleteAccount } = useAuth();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoSuccess, setPhotoSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedPhoto) {
+      setPhotoPreview(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(selectedPhoto);
+    setPhotoPreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [selectedPhoto]);
 
   // Profile fields
-  const [name, setName] = useState(user?.name || 'Emily Watson');
-  const [bio, setBio] = useState(user?.bio || 'CS & Interaction Design Senior 🌸');
-  const [major, setMajor] = useState(user?.major || 'Computer Science & HCI');
-  const [email, setEmail] = useState(user?.email || 'emily.watson@university.edu');
+  const [name, setName] = useState(user?.name || '');
+  const [bio, setBio] = useState(user?.bio || '');
+  const [major, setMajor] = useState(user?.major || '');
+  const [email, setEmail] = useState(user?.email || '');
 
   // Privacy toggles
   const [profileVisible, setProfileVisible] = useState(true);
@@ -39,6 +58,49 @@ export const SettingsPage: React.FC = () => {
     alert('Profile settings updated successfully!');
   };
 
+  const handlePhotoSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!PROFILE_PHOTO_TYPES.has(file.type)) {
+      setPhotoError('Choose a JPG, PNG, or WebP image.');
+      setPhotoSuccess(null);
+      return;
+    }
+    if (file.size > PROFILE_PHOTO_MAX_BYTES) {
+      setPhotoError('Profile photos must be 5 MB or smaller.');
+      setPhotoSuccess(null);
+      return;
+    }
+
+    setPhotoError(null);
+    setPhotoSuccess(null);
+    setSelectedPhoto(file);
+  };
+
+  const handleCancelPhoto = () => {
+    setSelectedPhoto(null);
+    setPhotoError(null);
+    setPhotoSuccess(null);
+  };
+
+  const handleSavePhoto = async () => {
+    if (!selectedPhoto) return;
+    setPhotoLoading(true);
+    setPhotoError(null);
+    setPhotoSuccess(null);
+    try {
+      await uploadProfilePhoto(selectedPhoto);
+      setSelectedPhoto(null);
+      setPhotoSuccess('Profile photo updated.');
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : 'Unable to update your profile photo.');
+    } finally {
+      setPhotoLoading(false);
+    }
+  };
+
   const handleExportData = () => {
     const dataStr = JSON.stringify(
       {
@@ -61,9 +123,8 @@ export const SettingsPage: React.FC = () => {
     <div className="space-y-6 pb-12 animate-fade-in max-w-4xl">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
           <span>Profile & Account Settings</span>
-          <Badge variant="primary">FR-15 Preferences</Badge>
         </h2>
         <p className="text-xs text-muted-purple mt-0.5">
           Manage your student identity, privacy visibility, notification alerts, and data exports.
@@ -78,15 +139,62 @@ export const SettingsPage: React.FC = () => {
         </h3>
 
         <form onSubmit={handleSaveProfile} className="space-y-4">
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
             <img
-              src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80'}
+              src={photoPreview || user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80'}
               alt={user?.name || 'User'}
               className="w-16 h-16 rounded-full object-cover border-2 border-primary/30 shadow-sm"
             />
-            <div>
+            <div className="min-w-0">
               <h4 className="text-sm font-bold text-deep-purple dark:text-white">{name}</h4>
               <p className="text-xs text-muted-purple">{email}</p>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                aria-label="Choose profile photo"
+                onChange={handlePhotoSelection}
+              />
+              <div className="flex flex-wrap gap-2 mt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  pill
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoLoading}
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{selectedPhoto ? 'Choose Another' : 'Change Photo'}</span>
+                </Button>
+                {selectedPhoto && (
+                  <>
+                    <Button
+                      type="button"
+                      size="sm"
+                      pill
+                      onClick={handleSavePhoto}
+                      disabled={photoLoading}
+                    >
+                      <span>{photoLoading ? 'Saving...' : 'Save Photo'}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      pill
+                      onClick={handleCancelPhoto}
+                      disabled={photoLoading}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-purple mt-1">JPG, PNG, or WebP. Maximum 5 MB.</p>
+              {photoError && <p role="alert" className="text-xs text-rose-600 mt-1">{photoError}</p>}
+              {photoSuccess && <p role="status" className="text-xs text-emerald-600 mt-1">{photoSuccess}</p>}
             </div>
           </div>
 
@@ -139,11 +247,6 @@ export const SettingsPage: React.FC = () => {
 
       {/* Privacy Settings */}
       <Card className="p-6">
-        <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white pb-3 mb-4 border-b border-subtle flex items-center gap-2">
-          <Shield className="w-4 h-4 text-primary" />
-          <span>Privacy & Data Protection (FR-10, FR-15)</span>
-        </h3>
-
         <div className="space-y-3 text-xs">
           <label className="flex items-center justify-between p-3 rounded-2xl bg-primary-subtle/20 dark:bg-primary/5 cursor-pointer">
             <div>
@@ -273,10 +376,17 @@ export const SettingsPage: React.FC = () => {
         description="Ensure your new password contains at least 8 characters."
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            alert('Password changed successfully!');
-            setIsPasswordModalOpen(false);
+            try {
+              await changePassword(currentPw, newPw);
+              setCurrentPw('');
+              setNewPw('');
+              setIsPasswordModalOpen(false);
+              alert('Password changed successfully!');
+            } catch (error) {
+              alert(error instanceof Error ? error.message : 'Unable to change password.');
+            }
           }}
           className="space-y-4 pt-2"
         >
@@ -346,8 +456,11 @@ export const SettingsPage: React.FC = () => {
               size="sm"
               pill
               onClick={() => {
-                alert('Account deleted.');
-                window.location.href = '/login';
+                void deleteAccount().then(() => {
+                  window.location.href = '/login';
+                }).catch((error) => {
+                  alert(error instanceof Error ? error.message : 'Unable to delete account.');
+                });
               }}
             >
               Confirm Delete

@@ -152,7 +152,7 @@ test("scheduler emits due-task and study-session reminders once using database d
     assert.deepEqual(prismaCalls[0][1].where, {
         status: { not: "COMPLETED" },
         dueDate: {
-            gt: now,
+            gte: new Date("2026-11-15T06:15:00.000Z"),
             lte: new Date("2026-11-17T06:15:00.000Z")
         }
     });
@@ -201,14 +201,14 @@ test("scheduler excludes tasks outside the reminder window and completed tasks b
 
     assert.deepEqual(await scheduler.runOnce(), { createdCount: 0 });
     assert.deepEqual(taskQuery.where.status, { not: "COMPLETED" });
-    assert.equal(taskQuery.where.dueDate.gt, now);
+    assert.equal(taskQuery.where.dueDate.gte.getTime(), now.getTime() - 24 * 60 * 60 * 1000);
     assert.equal(
         taskQuery.where.dueDate.lte.getTime() - now.getTime(),
         24 * 60 * 60 * 1000
     );
 });
 
-test("scheduler intentionally skips reminders that became overdue during downtime", async () => {
+test("scheduler recovers overdue task reminders but skips missed future schedule reminders", async () => {
     const now = new Date("2026-11-16T06:40:00.000Z");
     const overdueTask = {
         id: TASK_ID,
@@ -239,7 +239,7 @@ test("scheduler intentionally skips reminders that became overdue during downtim
             task: {
                 findMany: async (args) => {
                     taskQuery = args;
-                    return overdueTask.dueDate > args.where.dueDate.gt ? [overdueTask] : [];
+                    return overdueTask.dueDate >= args.where.dueDate.gte ? [overdueTask] : [];
                 }
             },
             scheduleItem: { findMany: async () => [pastSession] }
@@ -253,9 +253,10 @@ test("scheduler intentionally skips reminders that became overdue during downtim
         clock: () => now
     });
 
-    assert.deepEqual(await scheduler.runOnce(), { createdCount: 0 });
-    assert.equal(taskQuery.where.dueDate.gt, now);
-    assert.equal(notificationInputs.length, 0);
+    assert.deepEqual(await scheduler.runOnce(), { createdCount: 1 });
+    assert.equal(taskQuery.where.dueDate.gte.getTime(), now.getTime() - 24 * 60 * 60 * 1000);
+    assert.equal(notificationInputs.length, 1);
+    assert.equal(notificationInputs[0].title, "Task overdue");
     assert.equal(getStudyReminderOccurrence(pastSession, now), null);
 });
 

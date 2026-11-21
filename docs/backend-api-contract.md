@@ -4,8 +4,9 @@ This document describes the backend routes currently mounted by `backend/src/app
 For the complete Study Planner and Notifications field rules and examples, see
 [Phase 06 Study Planner API Contract](./phase06-api-contract.md).
 
-The frontend API in `src/lib/api/client.ts` is still a local-storage mock. These
-backend endpoints do not currently back the frontend UI.
+The frontend API in `src/lib/api/client.ts` uses HTTP adapters for the
+implemented backend areas and retains local storage only for preferences and
+compatibility data.
 
 ## Base URL and authentication
 
@@ -40,6 +41,37 @@ fingerprinting and include `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
 `Permissions-Policy: geolocation=(), microphone=(), camera=()`, and
 `Cross-Origin-Resource-Policy: same-origin`.
+
+## Password recovery
+
+`POST /api/auth/forgot-password` accepts `{ "email": "student@example.com" }`
+and always returns a generic `202` response for syntactically valid emails.
+Known accounts receive an opaque 32-byte reset token with a SHA-256 hash stored
+in the database. The token expires after 30 minutes and is invalidated after use.
+Only an exact, unexpired, unused token can reset a password.
+
+The default local `EMAIL_PROVIDER=mock` does not send mail. For Resend, configure
+`EMAIL_PROVIDER=resend`, `EMAIL_API_KEY`, a provider-verified `EMAIL_FROM`,
+`EMAIL_FROM_NAME`, and `PASSWORD_RESET_URL`. The backend sends a reusable
+plain-text and HTML template containing a URL-encoded token. The Resend API
+request is bounded by `EMAIL_DELIVERY_TIMEOUT_MS` (default 5000 ms; maximum
+60000 ms).
+
+The existing custom webhook remains available as `EMAIL_PROVIDER=webhook` with
+`PASSWORD_RESET_DELIVERY_URL`. It receives the legacy `email`, `token`, and
+`expiresAt` fields. If `PASSWORD_RESET_URL` is set, the webhook also receives a
+reset URL and rendered message fields. Optional authorization and HMAC-SHA256
+signatures use `PASSWORD_RESET_DELIVERY_AUTHORIZATION` and
+`PASSWORD_RESET_DELIVERY_SIGNING_SECRET`; the legacy
+`PASSWORD_RESET_DELIVERY_TIMEOUT_MS` is still accepted. Production requires an
+explicit provider and HTTPS delivery/reset URLs. If delivery is not configured
+or fails, the API response remains generic and does not expose account
+existence, reset tokens, provider responses, or credentials.
+
+`POST /api/auth/reset-password` accepts
+`{ "token": "<64-character hex token>", "password": "<new password>" }`.
+The password must contain 8–72 UTF-8 bytes. Invalid, expired or reused tokens
+return `400`.
 
 ## Health and root
 
@@ -154,6 +186,11 @@ Create example:
 {
   "title": "Prepare release",
   "description": "Check production readiness",
+  "category": "Operations",
+  "tags": ["release", "database"],
+  "subtasks": [
+    { "id": "migrations", "title": "Review migrations", "completed": false }
+  ],
   "status": "TODO",
   "priority": "HIGH",
   "dueDate": "2026-12-01T12:30:00Z"
@@ -162,9 +199,13 @@ Create example:
 
 `title` is required on create and must be a non-empty string; it is trimmed
 and limited to 120 characters. `description` may be `null` or a non-empty,
-non-whitespace string up to 1,000 characters. `status` is `TODO`, `IN_PROGRESS`, or
-`COMPLETED`; `priority` is `LOW`, `MEDIUM`, or `HIGH`. Omitted status and
-priority use the database defaults (`TODO` and `MEDIUM`). `dueDate` may be
+non-whitespace string up to 1,000 characters. `category` is optional and is
+limited to 64 characters. `tags` is an optional array of at most 20 non-empty
+strings (64 characters each). `subtasks` is an optional array of at most 100
+objects with `id`, `title`, and `completed` fields. `status` is `TODO`,
+`IN_PROGRESS`, `IN_REVIEW`, or `COMPLETED`; `priority` is `LOW`, `MEDIUM`, or
+`HIGH`. Omitted status, priority, category, tags and subtasks use database
+defaults. `dueDate` may be
 `null`, an ISO `YYYY-MM-DD` date, or an ISO date-time with a timezone offset.
 A date-only value is interpreted as UTC midnight. Unsupported fields (including
 `userId`) are rejected with `400`.
@@ -181,6 +222,11 @@ The task DTO is:
   "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "title": "Prepare release",
   "description": "Check production readiness",
+  "category": "Operations",
+  "tags": ["release", "database"],
+  "subtasks": [
+    { "id": "migrations", "title": "Review migrations", "completed": false }
+  ],
   "status": "TODO",
   "priority": "HIGH",
   "dueDate": "2026-12-01T12:30:00.000Z",
@@ -196,7 +242,7 @@ cross-user resources return `404`; unexpected errors return the generic `500`.
 Validation failures return `400` using `{"error":"..."}`. Examples of the
 exact messages include `"A JSON object is required"`,
 `"Title must be a non-empty string"`,
-`"Status must be TODO, IN_PROGRESS, or COMPLETED"`,
+`"Status must be TODO, IN_PROGRESS, IN_REVIEW, or COMPLETED"`,
 `"Priority must be LOW, MEDIUM, or HIGH"`, and
 `"Due date must be an ISO 8601 date or date-time, or null"`. Unsupported fields
 return `"Unsupported task field: <field>"`; an empty `PUT` returns
@@ -363,37 +409,72 @@ timezone, defaulting to `Asia/Colombo`. The detailed request fields, response
 examples, validation rules, timezone behavior, and error codes are documented in
 [Phase 06 Study Planner API Contract](./phase06-api-contract.md).
 
+## Product APIs
+
+The following APIs require authentication and use the authenticated user as
+the data owner.
+
+### Habits
+
+- `GET /api/habits` and `POST /api/habits` list and create owned habits.
+- `PUT /api/habits/:id/check-ins` accepts
+  `{ "date": "YYYY-MM-DD", "checked": true|false }`. It is idempotent and
+  validates the date as a real calendar date. `DELETE /api/habits/:id` deletes
+  only an owned habit.
+
+### Notes
+
+- `GET/POST /api/notes`, `PUT/DELETE /api/notes/:id` are owner-scoped.
+- Notes default to private. Setting `isPrivate` to `false` creates or retains
+  an unguessable share code; restoring privacy clears the code.
+- `GET /api/notes/shared/:shareCode` is public and returns only the shared
+  note's ID, title, content, subject name, tags, and update time. Private notes
+  and invalid codes return `404`.
+
+### Focus sessions and XP
+
+- `POST /api/focus/sessions/start` accepts a subject and an integer duration
+  from 1 to 1440 minutes and returns a user-bound signed session token that
+  expires after 24 hours.
+- `POST /api/focus/sessions` accepts only `{ "sessionToken": "..." }`.
+  The backend checks the signature, user, expiry, elapsed server time, and
+  overlap with prior sessions before persisting a session and awarding XP in
+  one transaction. Completion tokens are single-use; early, overlapping, and
+  replayed completions return `409`.
+- `GET /api/focus/sessions` lists the caller's completed sessions.
+
+Client-submitted XP amounts and arbitrary XP writes are not accepted.
+
+### Study rooms, gamification, analytics, search, and administration
+
+Study rooms are available through `/api/study-rooms`; joining private rooms
+requires the passcode. `GET /api/study-rooms/:id/events` is an authenticated
+member-only SSE stream. Room event delivery is process-local.
+
+`GET /api/gamification` derives achievement progress and XP from persisted
+records. There is no client-write XP endpoint. `GET /api/analytics` supports
+`period=7d`, `30d`, or `semester`. `GET /api/search?q=...` searches only the
+authenticated user's tasks, notes, and habits.
+
+Admin metrics, moderation reports, and audit logs are exposed under
+`/api/admin/*` and enforce the `ADMIN` role on the server. No user-directory or
+role-management API is currently provided.
+
 ## Frontend integration status
 
-The current frontend `src/lib/api/client.ts` functions use mock data and
-`localStorage`; they do not call these HTTP routes. Before connecting the
-frontend, its API client and DTOs need an intentional compatibility update:
+The frontend API client is now backend-backed for authentication, tasks,
+Study Planner/calendar operations, AI conversations, persisted Brain Dumps,
+notifications, habits, notes, focus sessions, study rooms, gamification
+summaries, analytics and unified search. Browser `localStorage` remains only
+for theme/dashboard preference fallbacks and legacy compatibility data.
 
-- Authentication currently accepts a role rather than a password, returns a
-  mock `User`, and stores no JWT. Backend login requires email/password and
-  returns `{ token, user }`; registration requires a password and returns a
-  generic message without a user or token. The frontend `User` includes
-  `role`, `avatar`, and `joinedAt`, which the backend user DTO does not.
-- Frontend task statuses are lowercase and include `in_review`; priorities
-  include `urgent`. The backend uses uppercase enums and supports only
-  `TODO`, `IN_PROGRESS`, `COMPLETED`, `LOW`, `MEDIUM`, and `HIGH`. Frontend
-  tasks also include category, tags, subtasks, and time-tracking fields not
-  present in the backend DTO. Mock IDs such as `tsk_...` are not backend UUIDs.
-- The frontend Study Plan uses weekly hours and a `sessions` shape. The backend
-  uses minute targets, plan/subject UUIDs, persisted schedule items, and
-  explicit `availabilityWindows` for preview generation. See the Phase 06
-  contract before adapting this flow.
-- Frontend notification type names are `deadline`, `habit`, `room`, `system`,
-  and `achievement`; backend values are `task_due`, `task_completed`,
-  `study_reminder`, `study_plan_updated`, and `system`. The current frontend
-  mock exposes list and mark-read methods only; the backend also supports
-  pagination, filters, unread count, and deletion.
-- Frontend AI proposal and Brain Dump flows remain local mock workflows and
-  are not connected to these APIs. The backend supports persistent AI
-  conversations, explicit task-proposal approval, and persisted Brain Dump
-  review. The legacy `/api/ai/assistant` and `/api/brain-dumps/process`
-  endpoints remain stateless preview operations.
+Client DTO adapters map the backend task enums and notification types into the
+existing React types. Task category, tags, subtasks, and all four task states
+are persisted. The frontend must not send `userId` or other unsupported fields.
 
-Do not treat these mismatches as implicit API changes. The frontend integration
-should map deliberately to the documented backend contract or agree on a
-versioned contract update.
+Password recovery uses opaque persisted reset tokens. Study rooms provide
+persisted creation, passcode join and chat plus same-process Server-Sent Event
+synchronization through `GET /api/study-rooms/:id/events`. Multi-instance
+deployment requires a shared pub/sub broker before this feature can be treated
+as cross-replicas real-time. Administrative moderation and audit-log endpoints
+are persisted and enforce the server-side `ADMIN` role.

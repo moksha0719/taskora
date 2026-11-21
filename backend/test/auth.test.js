@@ -91,6 +91,26 @@ test("registration normalizes email and hashes the password without exposing acc
     });
 });
 
+test("registration accepts standard .com, .org, and .edu email addresses", async () => {
+    for (const email of [
+        "student@example.com",
+        "student@example.org",
+        "student@university.edu"
+    ]) {
+        const prisma = createPrismaMock();
+        await withServer(prisma, async (request) => {
+            const response = await request("/api/auth/register", jsonRequest({
+                name: "Alex Doe",
+                email,
+                password: "a-secure-password"
+            }));
+
+            assert.equal(response.status, 202, `expected ${email} to be accepted`);
+            assert.equal(prisma.storedUser().email, email);
+        });
+    }
+});
+
 test("registration rejects duplicate email addresses", async () => {
     const prisma = createPrismaMock();
     const registration = jsonRequest({

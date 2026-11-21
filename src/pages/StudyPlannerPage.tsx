@@ -358,6 +358,36 @@ export const StudyPlannerPage: React.FC = () => {
     }
   };
 
+  const activatePlan = async () => {
+    if (!plan) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const activated = await studyPlansApi.activatePlan(plan.id);
+      setPlan(activated);
+      setPlans((current) => current.map((item) => item.id === activated.id ? activated : item));
+      setNotice('Study plan activated.');
+      await loadPlans(activated.id);
+    } catch (cause) {
+      handleApiError(cause);
+    }
+  };
+
+  const deactivatePlan = async () => {
+    if (!plan) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const deactivated = await studyPlansApi.deactivatePlan(plan.id);
+      setPlan(deactivated);
+      setPlans((current) => current.map((item) => item.id === deactivated.id ? deactivated : item));
+      setNotice('Study plan deactivated.');
+      await loadPlans(deactivated.id);
+    } catch (cause) {
+      handleApiError(cause);
+    }
+  };
+
   const deletePlan = async () => {
     if (!plan || !window.confirm(`Delete "${plan.title}"? This cannot be undone.`)) return;
     setError(null);
@@ -534,6 +564,16 @@ export const StudyPlannerPage: React.FC = () => {
               Generate preview
             </Button>
           )}
+          {plan?.status === 'DRAFT' && persistedSchedule.length > 0 && (
+            <Button variant="primary" size="sm" pill onClick={() => void activatePlan()}>
+              Activate
+            </Button>
+          )}
+          {plan?.status === 'ACTIVE' && (
+            <Button variant="outline" size="sm" pill onClick={() => void deactivatePlan()}>
+              Deactivate
+            </Button>
+          )}
           <Button variant="outline" size="sm" pill onClick={openNewPlan}>
             <Plus className="h-4 w-4" />
             New plan
@@ -593,11 +633,6 @@ export const StudyPlannerPage: React.FC = () => {
             )}
           </Card>
 
-          {plan.status === 'DRAFT' && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              Plans are created as drafts. The API does not expose activation; saving a schedule does not activate the plan.
-            </div>
-          )}
 
           <section>
             <div className="mb-3 flex items-center justify-between">

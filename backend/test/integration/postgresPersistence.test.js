@@ -1,8 +1,11 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
 const { once } = require("node:events");
 const { randomUUID } = require("node:crypto");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 function getSafeTestDatabaseUrl(value) {
@@ -112,15 +115,59 @@ test("Taskora PostgreSQL persistence, ownership, constraints, and transactions",
     const createApp = require("../../src/app");
     const { createNotificationService } = require("../../src/services/notificationService");
     const { createStudyPlanService } = require("../../src/services/studyPlanService");
+    const { createProfilePhotoStorage } = require("../../src/services/profilePhotoStorage");
 
-    const appServer = await listen(createApp({ prismaClient: prisma }));
+    const profilePhotoDirectory = await fs.mkdtemp(
+        path.join(os.tmpdir(), "taskora-profile-photo-integration-")
+    );
+    const appServer = await listen(createApp({
+        prismaClient: prisma,
+        profilePhotoStorage: createProfilePhotoStorage({ directory: profilePhotoDirectory })
+    }));
+    const testUserIds = [];
     t.after(async () => {
-        await close(appServer.server);
-        await prisma.$disconnect();
+        try {
+            await close(appServer.server);
+            if (testUserIds.length > 0) {
+                await prisma.user.deleteMany({ where: { id: { in: testUserIds } } });
+            }
+        } finally {
+            try {
+                await fs.rm(profilePhotoDirectory, { recursive: true, force: true });
+            } finally {
+                await prisma.$disconnect();
+            }
+        }
     });
 
     const userA = await createUser(appServer.baseUrl, "user-a");
+    testUserIds.push(userA.user.id);
     const userB = await createUser(appServer.baseUrl, "user-b");
+    testUserIds.push(userB.user.id);
+    const photoBytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/r9sAAAAASUVORK5CYII=",
+        "base64"
+    );
+    const photoResponse = await fetch(`${appServer.baseUrl}/api/auth/profile/avatar`, {
+        method: "PUT",
+        headers: {
+            authorization: `Bearer ${userA.token}`,
+            "content-type": "image/png"
+        },
+        body: photoBytes
+    });
+    assert.equal(photoResponse.status, 200);
+    const photoResult = await photoResponse.json();
+    assert.match(photoResult.user.avatar, /^\/uploads\/profile-photos\//);
+    const persistedAvatar = await prisma.user.findUnique({
+        where: { id: userA.user.id },
+        select: { avatar: true }
+    });
+    assert.equal(persistedAvatar.avatar, photoResult.user.avatar);
+    const servedPhoto = await fetch(`${appServer.baseUrl}${persistedAvatar.avatar}`);
+    assert.equal(servedPhoto.status, 200);
+    assert.deepEqual(Buffer.from(await servedPhoto.arrayBuffer()), photoBytes);
+
     const me = await request(appServer.baseUrl, "GET", "/api/auth/me", userA.token);
     assert.equal(me.response.status, 200);
     assert.equal(me.body.user.id, userA.user.id);

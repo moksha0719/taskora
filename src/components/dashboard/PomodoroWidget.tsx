@@ -1,181 +1,125 @@
-import React, { useState, useEffect } from 'react';
-import { Card } from '../common/Card';
-import { Timer, Play, Pause, RotateCcw, ArrowRight } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowRight, Pause, Play, RotateCcw, Timer } from 'lucide-react';
+import { Card } from '../common/Card';
+import { useFocusTimer } from '../../context/FocusTimerContext';
+import { focusApi } from '../../lib/api/client';
+import type { FocusSession } from '../../types';
+
+function formatTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`;
+}
 
 export const PomodoroWidget: React.FC = () => {
-  const [secondsLeft, setSecondsLeft] = useState(25 * 60);
-  const [isActive, setIsActive] = useState(false);
-  const [completedSessions, setCompletedSessions] = useState(2);
-  const totalTargetSessions = 6;
+  const {
+    focusMinutes, breakMinutes, mode, secondsLeft, isActive, starting,
+    start, pause, reset, lastCompletedSession,
+  } = useFocusTimer();
+  const [sessions, setSessions] = useState<FocusSession[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let interval: any = null;
-    if (isActive && secondsLeft > 0) {
-      interval = setInterval(() => {
-        setSecondsLeft((s) => s - 1);
-      }, 1000);
-    } else if (secondsLeft === 0) {
-      setIsActive(false);
-      setCompletedSessions((prev) => Math.min(prev + 1, totalTargetSessions));
-      setSecondsLeft(25 * 60);
+    let active = true;
+    focusApi.getSessions()
+      .then((result) => {
+        if (active) setSessions(result);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load focus sessions.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!lastCompletedSession) return;
+    setSessions((previous) => [
+      lastCompletedSession,
+      ...previous.filter((session) => session.id !== lastCompletedSession.id),
+    ]);
+  }, [lastCompletedSession]);
+
+  const todaySessions = useMemo(
+    () => sessions.filter((session) => new Date(session.completedAt).toDateString() === new Date().toDateString()),
+    [sessions]
+  );
+  const todayMinutes = todaySessions.reduce((total, session) => total + session.durationMinutes, 0);
+  const totalSeconds = (mode === 'focus' ? focusMinutes : breakMinutes) * 60;
+  const progress = totalSeconds > 0 ? Math.min(1, Math.max(0, (totalSeconds - secondsLeft) / totalSeconds)) : 0;
+  const circumference = 314;
+
+  const handleToggle = async () => {
+    setError(null);
+    try {
+      if (isActive) pause();
+      else await start();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to start the focus timer.');
     }
-    return () => clearInterval(interval);
-  }, [isActive, secondsLeft]);
-
-  const toggleTimer = () => setIsActive(!isActive);
-  const resetTimer = () => {
-    setIsActive(false);
-    setSecondsLeft(25 * 60);
   };
-
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const progressPercent = ((25 * 60 - secondsLeft) / (25 * 60)) * 100;
-  const strokeDashoffset = 314 - (314 * progressPercent) / 100;
 
   return (
     <Card className="p-6 relative flex flex-col justify-between">
       <div>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-pink-100 dark:bg-pink-900/30 flex items-center justify-center text-rose-500">
-              <Timer className="w-5 h-5" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-pink-100 text-rose-500 dark:bg-pink-900/30">
+              <Timer className="h-5 w-5" />
             </div>
-            <h3 className="text-base sm:text-lg font-bold font-heading text-deep-purple dark:text-white">
-              Pomodoro Timer
-            </h3>
+            <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white">Focus Timer</h3>
           </div>
-
-          <Link
-            to="/focus"
-            className="text-xs font-semibold text-primary hover:text-primary-hover flex items-center gap-1 group"
-          >
-            <span>Full Mode</span>
-            <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+          <Link to="/focus" className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-hover">
+            Full Mode <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
-        {/* Center: Circular Ring + Plant Illustration */}
-        <div className="flex items-center justify-center gap-4 py-2">
-          {/* Circular Countdown Ring */}
-          <div className="relative w-36 h-36 flex items-center justify-center">
-            <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-              {/* Background ring */}
-              <circle
-                cx="60"
-                cy="60"
-                r="50"
-                fill="none"
-                stroke="#FEE2E2"
-                strokeWidth="7"
-                className="dark:stroke-rose-950/40"
-              />
-              {/* Animated Progress ring */}
-              <circle
-                cx="60"
-                cy="60"
-                r="50"
-                fill="none"
-                stroke="#F43F5E"
-                strokeWidth="7"
-                strokeDasharray="314"
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                className="transition-all duration-500"
-              />
+        <div className="flex items-center justify-center py-2">
+          <div className="relative flex h-36 w-36 items-center justify-center">
+            <svg className="h-full w-full -rotate-90" viewBox="0 0 120 120" aria-hidden="true">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#FEE2E2" strokeWidth="7" className="dark:stroke-rose-950/40" />
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#F43F5E" strokeWidth="7"
+                strokeDasharray={circumference} strokeDashoffset={circumference * (1 - progress)} strokeLinecap="round" />
             </svg>
-
-            {/* Inner Content matching reference */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-              <span className="text-[11px] font-bold text-rose-400 dark:text-rose-300">
-                Focus Time
-              </span>
-              <span className="text-2xl font-extrabold font-heading text-deep-purple dark:text-white my-0.5">
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-[11px] font-bold text-rose-400">{mode === 'focus' ? 'Focus' : 'Break'}</span>
+              <span className="my-0.5 text-2xl font-extrabold font-heading text-deep-purple dark:text-white" aria-live="off">
                 {formatTime(secondsLeft)}
               </span>
-              <div className="flex items-center gap-1 mt-1">
-                <button
-                  onClick={toggleTimer}
-                  className="px-3 py-1 rounded-full bg-rose-500 text-white text-xs font-bold shadow-sm hover:bg-rose-600 active:scale-95 transition-all flex items-center gap-1"
-                >
-                  {isActive ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
-                  <span>{isActive ? 'Pause' : 'Start'}</span>
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => void handleToggle()} disabled={starting}
+                  className="flex items-center gap-1 rounded-full bg-rose-500 px-3 py-1 text-xs font-bold text-white disabled:opacity-50">
+                  {isActive ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
+                  {starting ? 'Starting...' : isActive ? 'Pause' : secondsLeft === totalSeconds ? 'Start' : 'Resume'}
                 </button>
-                {secondsLeft < 25 * 60 && (
-                  <button
-                    onClick={resetTimer}
-                    className="p-1 rounded-full text-muted-purple hover:bg-primary-subtle"
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
+                {secondsLeft !== totalSeconds && (
+                  <button type="button" onClick={reset} className="rounded-full p-1 text-muted-purple hover:bg-primary-subtle" aria-label="Reset focus timer">
+                    <RotateCcw className="h-3 w-3" />
                   </button>
                 )}
               </div>
             </div>
           </div>
-
-          {/* Plant Illustration matching reference visual */}
-          <div className="flex flex-col items-center justify-end h-32 select-none">
-            <svg
-              viewBox="0 0 64 90"
-              className="w-16 h-24 transition-transform hover:scale-105 duration-300"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              {/* Leaves */}
-              <path
-                d="M32 45 C32 25 18 10 18 10 C18 10 14 26 24 38 C28 42 32 45 32 45 Z"
-                fill="#86EFAC"
-              />
-              <path
-                d="M32 40 C32 20 46 8 46 8 C46 8 50 24 40 35 C36 38 32 40 32 40 Z"
-                fill="#4ADE80"
-              />
-              <path
-                d="M32 55 C32 35 22 25 22 25 C22 25 20 38 28 48 C30 50 32 55 32 55 Z"
-                fill="#22C55E"
-              />
-              <path
-                d="M32 52 C32 34 44 24 44 24 C44 24 44 38 36 48 C34 50 32 52 32 52 Z"
-                fill="#86EFAC"
-              />
-              <path
-                d="M32 30 C32 10 32 2 32 2 C32 2 34 10 34 22 C34 26 32 30 32 30 Z"
-                fill="#4ADE80"
-              />
-              {/* Stem */}
-              <line x1="32" y1="20" x2="32" y2="60" stroke="#15803D" strokeWidth="2.5" strokeLinecap="round" />
-              {/* Pot */}
-              <path
-                d="M18 60 L46 60 L42 84 L22 84 Z"
-                fill="#FDA4AF"
-              />
-              <rect x="15" y="58" width="34" height="6" rx="3" fill="#FB7185" />
-            </svg>
-          </div>
         </div>
       </div>
 
-      {/* Bottom Session Counter & Bar */}
-      <div className="mt-4 pt-3 border-t border-subtle">
-        <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
-          <span className="text-muted-purple">Today's Focus</span>
-          <span className="text-deep-purple dark:text-white font-bold">
-            {completedSessions} / {totalTargetSessions} sessions
+      <div className="mt-4 border-t border-subtle pt-3">
+        {error && <p role="alert" className="mb-2 text-xs text-rose-600">{error}</p>}
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-muted-purple">Today&apos;s focus</span>
+          <span className="font-bold text-deep-purple dark:text-white">
+            {loading ? 'Loading...' : `${todayMinutes} min · ${todaySessions.length} sessions`}
           </span>
         </div>
-        <div className="w-full h-2 rounded-full bg-rose-100 dark:bg-rose-950/40 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-rose-500 transition-all duration-500"
-            style={{ width: `${(completedSessions / totalTargetSessions) * 100}%` }}
-          />
-        </div>
+        {!loading && todaySessions.length === 0 && !error && (
+          <p className="mt-1 text-[11px] text-muted-purple">No completed focus sessions today.</p>
+        )}
       </div>
     </Card>
   );

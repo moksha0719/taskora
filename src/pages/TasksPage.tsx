@@ -105,7 +105,6 @@ export const TasksPage: React.FC = () => {
       });
     } else {
       await tasksApi.createTask({
-        userId: 'usr_emily_01',
         title,
         description,
         dueDate,

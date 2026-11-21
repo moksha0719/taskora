@@ -5,6 +5,7 @@ import {
   CheckSquare,
   Calendar as CalendarIcon,
   BookOpen,
+  Layers,
   Bot,
   Lightbulb,
   Hourglass,
@@ -35,6 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onNavigate, className }) => {
     { label: 'Tasks', path: '/tasks', icon: CheckSquare },
     { label: 'Calendar', path: '/calendar', icon: CalendarIcon },
     { label: 'Study Planner', path: '/study-planner', icon: BookOpen },
+    { label: 'Flashcards', path: '/flashcards', icon: Layers },
     { label: 'AI Assistant', path: '/ai-assistant', icon: Bot, badge: 'Proposals' },
     { label: 'Brain Dump', path: '/brain-dump', icon: Lightbulb },
     { label: 'Focus Mode', path: '/focus', icon: Hourglass },
@@ -73,7 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onNavigate, className }) => {
             </div>
           </div>
           <h2 className="text-base font-bold font-heading text-deep-purple dark:text-white flex items-center gap-1.5">
-            Hi, {user?.name?.split(' ')[0] || 'Emily'}! 👋
+            Hi, {user?.name?.split(' ')[0] || 'there'}! 👋
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Good to see you again

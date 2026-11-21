@@ -11,6 +11,7 @@ datasource db {
 enum TaskStatus {
   TODO
   IN_PROGRESS
+  IN_REVIEW
   COMPLETED
 }
 
@@ -65,11 +66,25 @@ enum ActionProposalStatus {
   EXPIRED
 }
 
+enum UserRole {
+  STUDENT
+  ADMIN
+}
+
+enum RoomMode {
+  FOCUS
+  BREAK
+}
+
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
   email     String   @unique
   password  String // Store password hashes only.
+  role      UserRole @default(STUDENT)
+  avatar    String?
+  bio       String?
+  major     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tasks     Task[]
@@ -77,19 +92,36 @@ model User {
   notifications Notification[]
   aiConversations AiConversation[]
   brainDumps BrainDump[]
+  habits Habit[]
+  habitCheckIns HabitCheckIn[]
+  notes StudyNote[]
+  focusSessions FocusSession[]
+  studyRooms StudyRoom[]
+  roomMemberships RoomParticipant[]
+  roomMessages RoomMessage[]
+  flashcardDecks FlashcardDeck[]
+  xpTransactions XPTransaction[]
+  achievements UserAchievement[]
+  passwordResetTokens PasswordResetToken[]
+  moderationReports ModerationReport[] @relation("ModerationReporter")
+  resolvedModerationReports ModerationReport[] @relation("ModerationResolver")
+  auditLogs AuditLog[]
 }
 
 model Task {
   id          String       @id @default(uuid()) @db.Uuid
   title       String
   description String?
+  category    String       @default("General") @db.VarChar(64)
+  tags        String[]     @default([])
+  subtasks    Json         @default("[]")
   status      TaskStatus   @default(TODO)
   priority    TaskPriority @default(MEDIUM)
   dueDate     DateTime?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   userId      String       @db.Uuid
-  user        User         @relation(fields: [userId], references: [id])
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   notifications Notification[]
   assistantProposals AssistantProposal[]
   brainDumpProposals BrainDumpTaskProposal[]
@@ -257,4 +289,238 @@ model BrainDumpTaskProposal {
   approvedTask   Task?                @relation(fields: [approvedTaskId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([userId, status, createdAt])
+}
+
+model Habit {
+  id          String          @id @default(uuid()) @db.Uuid
+  userId      String          @db.Uuid
+  title       String          @db.VarChar(120)
+  description String?         @db.VarChar(1000)
+  category    String          @db.VarChar(64)
+  color       String          @db.VarChar(7)
+  iconName    String          @db.VarChar(64)
+  frequency   String          @db.VarChar(16)
+  reminderTime String?        @db.VarChar(5)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIns    HabitCheckIn[]
+
+  @@index([userId, createdAt])
+}
+
+model HabitCheckIn {
+  id        String   @id @default(uuid()) @db.Uuid
+  habitId   String   @db.Uuid
+  userId    String   @db.Uuid
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([habitId, date])
+  @@index([userId, date])
+}
+
+model StudyNote {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  subjectId  String?
+  subjectName String?
+  title      String   @db.VarChar(160)
+  content    String   @db.VarChar(20000)
+  tags       String[] @default([])
+  isPrivate  Boolean  @default(true)
+  shareCode  String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+}
+
+model FocusSession {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  subject         String   @db.VarChar(120)
+  durationMinutes Int
+  notes           String?  @db.VarChar(2000)
+  xpEarned        Int
+  completionKey   String?  @unique
+  completedAt     DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completedAt])
+}
+
+model StudyRoom {
+  id                    String           @id @default(uuid()) @db.Uuid
+  ownerId               String           @db.Uuid
+  name                  String           @db.VarChar(120)
+  topic                 String           @db.VarChar(160)
+  isPrivate             Boolean          @default(false)
+  passcodeHash          String?
+  maxParticipants       Int              @default(8)
+  focusDurationMinutes  Int              @default(25)
+  breakDurationMinutes  Int              @default(5)
+  currentMode           RoomMode         @default(FOCUS)
+  timerRemainingSeconds Int              @default(1500)
+  timerStartedAt        DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  owner                 User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  participants          RoomParticipant[]
+  messages              RoomMessage[]
+
+  @@index([ownerId, createdAt])
+}
+
+model FlashcardDeck {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @db.Uuid
+  title       String      @db.VarChar(120)
+  description String?     @db.VarChar(1000)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  cards       Flashcard[]
+
+  @@index([userId, updatedAt])
+}
+
+model Flashcard {
+  id              String       @id @default(uuid()) @db.Uuid
+  deckId          String       @db.Uuid
+  front           String       @db.VarChar(4000)
+  back            String       @db.VarChar(4000)
+  position        Int          @default(0)
+  repetitions     Int          @default(0)
+  intervalDays    Int          @default(0)
+  easeFactor      Float        @default(2.5)
+  reviewCount     Int          @default(0)
+  dueAt           DateTime     @default(now())
+  lastReviewedAt  DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deck            FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([deckId, position])
+  @@index([deckId, dueAt])
+}
+
+model RoomParticipant {
+  id        String    @id @default(uuid()) @db.Uuid
+  roomId    String    @db.Uuid
+  userId    String    @db.Uuid
+  status    String    @db.VarChar(16)
+  joinedAt  DateTime  @default(now())
+  room      StudyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+}
+
+model RoomMessage {
+  id        String    @id @default(uuid()) @db.Uuid
+  roomId    String    @db.Uuid
+  userId    String    @db.Uuid
+  content   String    @db.VarChar(2000)
+  createdAt DateTime  @default(now())
+  room      StudyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+}
+
+model XPTransaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  amount    Int
+  reason    String   @db.VarChar(200)
+  source    String   @db.VarChar(32)
+  dedupeKey String?  @unique
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Achievement {
+  id          String            @id @default(uuid()) @db.Uuid
+  key         String            @unique
+  title       String            @db.VarChar(120)
+  description String            @db.VarChar(500)
+  category    String            @db.VarChar(32)
+  icon        String            @db.VarChar(64)
+  xpReward    Int
+  requirement Int
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid()) @db.Uuid
+  userId        String      @db.Uuid
+  achievementId String      @db.Uuid
+  progress      Int         @default(0)
+  unlockedAt    DateTime?
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+enum ModerationTargetType {
+  NOTE
+  ROOM_MESSAGE
+  USER
+}
+
+enum ModerationStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+model ModerationReport {
+  id            String               @id @default(uuid()) @db.Uuid
+  reporterId    String               @db.Uuid
+  targetType    ModerationTargetType
+  targetId      String               @db.Uuid
+  reason        String               @db.VarChar(500)
+  contentSnippet String              @db.VarChar(2000)
+  status        ModerationStatus     @default(PENDING)
+  resolvedById  String?              @db.Uuid
+  resolvedAt    DateTime?
+  createdAt     DateTime             @default(now())
+  reporter      User                 @relation("ModerationReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  resolvedBy    User?                @relation("ModerationResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([reporterId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @db.Uuid
+  action    String   @db.VarChar(120)
+  target    String   @db.VarChar(200)
+  ipAddress String?  @db.VarChar(64)
+  details   Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
 }

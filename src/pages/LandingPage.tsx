@@ -81,7 +81,7 @@ export const LandingPage: React.FC = () => {
             </Link>
             <Link to="/login" className="w-full sm:w-auto">
               <Button variant="secondary" size="lg" pill className="w-full sm:w-auto">
-                <span>Live Demo (Student / Admin)</span>
+                <span>Sign in</span>
               </Button>
             </Link>
           </div>
@@ -108,22 +108,6 @@ export const LandingPage: React.FC = () => {
               Your personal study companion cheering you on through every Pomodoro and exam cram!
             </p>
 
-            <div className="mt-6 pt-4 border-t border-subtle flex items-center justify-around text-xs">
-              <div>
-                <span className="block font-bold text-lg text-primary">24+</span>
-                <span className="text-muted-purple text-[11px]">Tasks Done</span>
-              </div>
-              <div className="w-px h-8 bg-subtle" />
-              <div>
-                <span className="block font-bold text-lg text-soft-pink-text dark:text-pink-300">18h</span>
-                <span className="text-muted-purple text-[11px]">Focus Time</span>
-              </div>
-              <div className="w-px h-8 bg-subtle" />
-              <div>
-                <span className="block font-bold text-lg text-mint-accent-text dark:text-emerald-300">14 Days</span>
-                <span className="text-muted-purple text-[11px]">Streak 🔥</span>
-              </div>
-            </div>
           </Card>
         </div>
       </section>

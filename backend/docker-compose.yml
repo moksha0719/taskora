@@ -30,6 +30,17 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in backend/.env}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      EMAIL_API_KEY: ${EMAIL_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-no-reply@example.invalid}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Taskora}
+      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL:-http://localhost:5173/forgot-password}
+      EMAIL_DELIVERY_TIMEOUT_MS: ${EMAIL_DELIVERY_TIMEOUT_MS:-5000}
+      PASSWORD_RESET_DELIVERY_URL: ${PASSWORD_RESET_DELIVERY_URL:-}
+      PASSWORD_RESET_DELIVERY_AUTHORIZATION: ${PASSWORD_RESET_DELIVERY_AUTHORIZATION:-}
+      PASSWORD_RESET_DELIVERY_SIGNING_SECRET: ${PASSWORD_RESET_DELIVERY_SIGNING_SECRET:-}
+      PASSWORD_RESET_DELIVERY_TIMEOUT_MS: ${PASSWORD_RESET_DELIVERY_TIMEOUT_MS:-}
+      PROFILE_UPLOAD_DIR: /app/uploads/profile-photos
       DATABASE_URL: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in backend/.env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}@postgres:5432/${POSTGRES_DB:-taskora_db}?schema=public"
     ports:
       - "5000:5000"
@@ -42,6 +53,7 @@ services:
       - ./prisma.config.ts:/app/prisma.config.ts:ro
       - ./tsconfig.prisma.json:/app/tsconfig.prisma.json:ro
       - backend_node_modules:/app/node_modules
+      - backend_profile_photos:/app/uploads/profile-photos
     healthcheck:
       test:
         - CMD
@@ -56,3 +68,4 @@ services:
 volumes:
   taskora_postgres_data:
   backend_node_modules:
+  backend_profile_photos:

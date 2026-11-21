@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { adminApi } from '../lib/api/client';
 import { AdminStats, ModerationReport, AuditLogEntry } from '../types';
-import { ShieldCheck, AlertTriangle, Users, Database, Clock, CheckCircle2, XCircle, Search } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, Users, Database, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const AdminPage: React.FC = () => {
@@ -12,56 +12,77 @@ export const AdminPage: React.FC = () => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [reports, setReports] = useState<ModerationReport[]>([]);
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
-  const [userSearch, setUserSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchAdminData = async () => {
-    const s = await adminApi.getStats();
-    const r = await adminApi.getReports();
-    const l = await adminApi.getAuditLogs();
-    setStats(s);
-    setReports(r);
-    setLogs(l);
+    if (user?.role !== 'admin') return;
+    setLoading(true);
+    setError(null);
+    try {
+      const s = await adminApi.getStats();
+      const r = await adminApi.getReports();
+      const l = await adminApi.getAuditLogs();
+      setStats(s);
+      setReports(r);
+      setLogs(l);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load administration data.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchAdminData();
-  }, []);
+    if (user?.role === 'admin') void fetchAdminData();
+  }, [user?.role]);
 
   const handleResolve = async (id: string, action: 'resolved' | 'dismissed') => {
-    await adminApi.resolveReport(id, action);
-    fetchAdminData();
+    try {
+      await adminApi.resolveReport(id, action);
+      await fetchAdminData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to update the moderation report.');
+    }
   };
 
-  const mockUsers = [
-    { id: 'usr_1', name: 'Emily Watson', email: 'emily.watson@university.edu', role: 'Student', status: 'Active', hours: '18h' },
-    { id: 'usr_2', name: 'Alex Rivera', email: 'alex.rivera@university.edu', role: 'Student', status: 'Active', hours: '24h' },
-    { id: 'usr_3', name: 'Dr. Alexander Vance', email: 'admin@taskora.edu', role: 'Admin', status: 'Active', hours: '12h' },
-    { id: 'usr_4', name: 'Sophia Chen', email: 'sophia@university.edu', role: 'Student', status: 'Active', hours: '31h' },
-  ];
+  const pendingReportCount = loading
+    ? '…'
+    : error
+      ? '—'
+      : reports.filter((report) => report.status === 'pending').length;
 
-  const filteredUsers = mockUsers.filter(
-    (u) =>
-      u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.email.toLowerCase().includes(userSearch.toLowerCase())
-  );
+  if (user?.role !== 'admin') {
+    return (
+      <Card className="p-6 text-sm text-muted-purple">
+        Admin access is required to view this page.
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>Administration & Governance</span>
-            <Badge variant="peach">FR-16 Role-Gated</Badge>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Operational telemetry, community content moderation, and audited system event logs.
           </p>
         </div>
 
+        {loading && (
+          <Card className="p-5 text-sm text-muted-purple">Loading administration data...</Card>
+        )}
+        {error && (
+          <Card className="p-5 text-sm text-rose-600">{error}</Card>
+        )}
+
         <div className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>System Health: Nominal ({stats?.serverUptimePercent || 99.98}%)</span>
+          <span>System Status: {loading ? 'Checking' : error ? 'Unavailable' : 'Connected'}</span>
         </div>
       </div>
 
@@ -75,9 +96,11 @@ export const AdminPage: React.FC = () => {
             <div>
               <span className="text-xs text-muted-purple">Registered Scholars</span>
               <div className="text-2xl font-bold text-deep-purple dark:text-white">
-                {stats?.totalUsers || 1428}
+                {loading ? '…' : stats?.totalUsers.toLocaleString() ?? '—'}
               </div>
-              <span className="text-xs text-primary font-semibold">{stats?.activeUsersToday || 412} active today</span>
+              <span className="text-xs text-primary font-semibold">
+                {loading ? 'Checking activity...' : stats ? `${stats.activeUsersToday.toLocaleString()} active today` : 'Unavailable'}
+              </span>
             </div>
           </div>
         </Card>
@@ -90,9 +113,9 @@ export const AdminPage: React.FC = () => {
             <div>
               <span className="text-xs text-muted-purple">Total Study Hours</span>
               <div className="text-2xl font-bold text-deep-purple dark:text-white">
-                {(stats?.totalStudyHours || 19840).toLocaleString()}h
+                {loading ? '…' : stats ? `${stats.totalStudyHours.toLocaleString()}h` : '—'}
               </div>
-              <span className="text-xs text-amber-600 font-semibold">Across 8 departments</span>
+              <span className="text-xs text-muted-purple font-semibold">All recorded focus sessions</span>
             </div>
           </div>
         </Card>
@@ -105,9 +128,9 @@ export const AdminPage: React.FC = () => {
             <div>
               <span className="text-xs text-muted-purple">Tasks Completed</span>
               <div className="text-2xl font-bold text-deep-purple dark:text-white">
-                {(stats?.totalTasksCompleted || 34820).toLocaleString()}
+                {loading ? '…' : stats?.totalTasksCompleted.toLocaleString() ?? '—'}
               </div>
-              <span className="text-xs text-emerald-600 font-semibold">89.4% on-time completion</span>
+              <span className="text-xs text-muted-purple font-semibold">All recorded completed tasks</span>
             </div>
           </div>
         </Card>
@@ -120,7 +143,7 @@ export const AdminPage: React.FC = () => {
             <div>
               <span className="text-xs text-muted-purple">Moderation Queue</span>
               <div className="text-2xl font-bold text-deep-purple dark:text-white">
-                {reports.filter((r) => r.status === 'pending').length}
+                {pendingReportCount}
               </div>
               <span className="text-xs text-rose-500 font-semibold">Requires faculty review</span>
             </div>
@@ -140,10 +163,13 @@ export const AdminPage: React.FC = () => {
               Protecting student study spaces from spam, off-topic links, and policy violations.
             </p>
           </div>
-          <Badge variant="pink">{reports.filter((r) => r.status === 'pending').length} Pending</Badge>
+          <Badge variant="pink">{pendingReportCount} Pending</Badge>
         </div>
 
         <div className="space-y-3">
+          {!loading && !error && reports.length === 0 && (
+            <p className="text-sm text-muted-purple">No moderation reports are available.</p>
+          )}
           {reports.map((report) => (
             <div
               key={report.id}
@@ -186,7 +212,7 @@ export const AdminPage: React.FC = () => {
                     pill
                     onClick={() => handleResolve(report.id, 'resolved')}
                   >
-                    Resolve & Censor
+                    Resolve
                   </Button>
                 </div>
               )}
@@ -205,64 +231,18 @@ export const AdminPage: React.FC = () => {
             <p className="text-xs text-muted-purple">Active platform scholars and role assignments.</p>
           </div>
 
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-muted-purple absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search student or email..."
-              value={userSearch}
-              onChange={(e) => setUserSearch(e.target.value)}
-              className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-subtle bg-white dark:bg-[#181131]"
-            />
-          </div>
         </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-subtle text-muted-purple uppercase text-[10px] font-bold">
-                <th className="py-2.5 px-3">Student Name</th>
-                <th className="py-2.5 px-3">Email Address</th>
-                <th className="py-2.5 px-3">Platform Role</th>
-                <th className="py-2.5 px-3">Total Study Logged</th>
-                <th className="py-2.5 px-3">Account Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-subtle/60">
-              {filteredUsers.map((u) => (
-                <tr key={u.id} className="hover:bg-primary-subtle/20 transition-colors">
-                  <td className="py-3 px-3 font-bold text-deep-purple dark:text-white">
-                    {u.name}
-                  </td>
-                  <td className="py-3 px-3 text-muted-purple">{u.email}</td>
-                  <td className="py-3 px-3">
-                    <Badge variant={u.role === 'Admin' ? 'peach' : 'primary'}>
-                      {u.role}
-                    </Badge>
-                  </td>
-                  <td className="py-3 px-3 font-semibold text-primary">{u.hours}</td>
-                  <td className="py-3 px-3">
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                      ● Active
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="rounded-2xl border border-subtle p-4 text-xs text-muted-purple">
+          User directory management is not yet available.
         </div>
       </Card>
 
-      {/* System Audit Logs (FR-16) */}
       <Card className="p-6">
         <div className="pb-3 mb-3 border-b border-subtle flex items-center justify-between">
           <div>
-            <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white">
-              Immutable Audit Log (FR-16)
-            </h3>
-            <p className="text-xs text-muted-purple">Security events, role elevations, and room creation actions.</p>
+            <p className="text-xs text-muted-purple">Recorded moderation events and related activity.</p>
           </div>
-          <Badge variant="muted">Compliant</Badge>
+          <Badge variant="muted">Recorded events</Badge>
         </div>
 
         <div className="overflow-x-auto">
@@ -294,6 +274,11 @@ export const AdminPage: React.FC = () => {
                   </td>
                 </tr>
               ))}
+              {!loading && !error && logs.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-4 px-3 text-muted-purple">No audit log entries are available.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

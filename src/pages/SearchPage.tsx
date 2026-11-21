@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge, PriorityBadge, StatusBadge } from '../components/common/Badge';
-import { tasksApi, notesApi, habitsApi } from '../lib/api/client';
+import { searchApi } from '../lib/api/client';
 import { Task, StudyNote, Habit } from '../types';
 import { Search, Filter, CheckSquare, FileText, Flame, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -15,12 +15,37 @@ export const SearchPage: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<StudyNote[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
-    tasksApi.getTasks().then(setTasks);
-    notesApi.getNotes().then(setNotes);
-    habitsApi.getHabits().then(setHabits);
-  }, []);
+    let active = true;
+    setLoading(true);
+    setSearchError(null);
+    const timeout = window.setTimeout(() => {
+      searchApi.search(query)
+        .then((result) => {
+          if (!active) return;
+          setTasks(result.tasks);
+          setNotes(result.notes);
+          setHabits(result.habits);
+        })
+        .catch((cause: unknown) => {
+          if (!active) return;
+          setTasks([]);
+          setNotes([]);
+          setHabits([]);
+          setSearchError(cause instanceof Error ? cause.message : 'Unable to search your data.');
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 150);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [query]);
 
   const cleanQuery = query.toLowerCase().trim();
 
@@ -35,14 +60,17 @@ export const SearchPage: React.FC = () => {
   const matchingHabits = habits.filter((h) =>
     !cleanQuery || h.title.toLowerCase().includes(cleanQuery) || h.category.toLowerCase().includes(cleanQuery)
   );
+  const hasFilteredResults =
+    ((filterType === 'all' || filterType === 'tasks') && matchingTasks.length > 0) ||
+    ((filterType === 'all' || filterType === 'notes') && matchingNotes.length > 0) ||
+    ((filterType === 'all' || filterType === 'habits') && matchingHabits.length > 0);
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
           <span>Global Search</span>
-          <Badge variant="primary">FR-14 Search & Filters</Badge>
         </h2>
         <p className="text-xs text-muted-purple mt-0.5">
           Unified index across your tasks, study workspace notes, habits, and syllabus documents.
@@ -83,8 +111,18 @@ export const SearchPage: React.FC = () => {
 
       {/* Results Sections */}
       <div className="space-y-6">
+        {loading && <Card role="status" className="p-5 text-sm text-muted-purple">Searching your data...</Card>}
+        {searchError && <Card role="alert" className="p-5 text-sm text-rose-600">{searchError}</Card>}
+        {!loading && !searchError && !hasFilteredResults && (
+          <Card className="p-6 text-sm text-muted-purple">
+            {cleanQuery
+              ? `No matching ${filterType === 'all' ? 'tasks, notes, or habits' : filterType} were found.`
+              : 'You do not have tasks, notes, or habits to search yet.'}
+          </Card>
+        )}
+
         {/* Tasks Section */}
-        {(filterType === 'all' || filterType === 'tasks') && matchingTasks.length > 0 && (
+        {!loading && !searchError && (filterType === 'all' || filterType === 'tasks') && matchingTasks.length > 0 && (
           <div className="space-y-3">
             <h3 className="text-sm font-bold uppercase tracking-wider text-muted-purple flex items-center gap-2">
               <CheckSquare className="w-4 h-4 text-primary" />
@@ -115,7 +153,7 @@ export const SearchPage: React.FC = () => {
         )}
 
         {/* Notes Section */}
-        {(filterType === 'all' || filterType === 'notes') && matchingNotes.length > 0 && (
+        {!loading && !searchError && (filterType === 'all' || filterType === 'notes') && matchingNotes.length > 0 && (
           <div className="space-y-3">
             <h3 className="text-sm font-bold uppercase tracking-wider text-muted-purple flex items-center gap-2">
               <FileText className="w-4 h-4 text-primary" />
@@ -143,7 +181,7 @@ export const SearchPage: React.FC = () => {
         )}
 
         {/* Habits Section */}
-        {(filterType === 'all' || filterType === 'habits') && matchingHabits.length > 0 && (
+        {!loading && !searchError && (filterType === 'all' || filterType === 'habits') && matchingHabits.length > 0 && (
           <div className="space-y-3">
             <h3 className="text-sm font-bold uppercase tracking-wider text-muted-purple flex items-center gap-2">
               <Flame className="w-4 h-4 text-primary" />

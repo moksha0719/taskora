@@ -4,31 +4,74 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { notificationsApi } from '../lib/api/client';
 import { NotificationItem } from '../types';
-import { Bell, Check, CheckCheck, Clock, Trash2, ArrowRight } from 'lucide-react';
+import { CheckCheck, Trash2, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const NotificationsPage: React.FC = () => {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [filter, setFilter] = useState<string>('all');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const fetchNotifs = async () => {
-    const data = await notificationsApi.getNotifications();
-    setNotifications(data);
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setNotifications(await notificationsApi.getNotifications());
+    } catch (cause) {
+      setLoadError(cause instanceof Error ? cause.message : 'Unable to load notifications.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchNotifs();
+    void fetchNotifs();
   }, []);
 
   const handleMarkRead = async (id: string) => {
-    await notificationsApi.markRead(id);
-    fetchNotifs();
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await notificationsApi.markRead(id);
+      window.dispatchEvent(new Event('taskora:notifications-updated'));
+      await fetchNotifs();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Unable to mark the notification as read.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleMarkAllRead = async () => {
-    await notificationsApi.markAllRead();
-    fetchNotifs();
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await notificationsApi.markAllRead();
+      window.dispatchEvent(new Event('taskora:notifications-updated'));
+      await fetchNotifs();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Unable to mark all notifications as read.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await notificationsApi.deleteNotification(id);
+      window.dispatchEvent(new Event('taskora:notifications-updated'));
+      await fetchNotifs();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Unable to delete the notification.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const filteredNotifs = notifications.filter(
@@ -40,16 +83,15 @@ export const NotificationsPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>Notifications Center</span>
-            <Badge variant="primary">FR-13 Alerts</Badge>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Stay on top of upcoming assignment deadlines, habit reminders, and study room activity.
           </p>
         </div>
 
-        <Button variant="outline" size="sm" pill onClick={handleMarkAllRead}>
+        <Button variant="outline" size="sm" pill disabled={actionBusy || !notifications.some((item) => !item.read)} onClick={() => void handleMarkAllRead()}>
           <CheckCheck className="w-4 h-4 text-primary" />
           <span>Mark All Read</span>
         </Button>
@@ -74,7 +116,24 @@ export const NotificationsPage: React.FC = () => {
 
       {/* Notifications List */}
       <div className="space-y-3">
-        {filteredNotifs.map((item) => (
+        {actionError && <Card role="alert" className="p-4 text-sm text-rose-600">{actionError}</Card>}
+        {loading && <Card role="status" className="p-5 text-sm text-muted-purple">Loading notifications...</Card>}
+        {loadError && (
+          <Card role="alert" className="p-5 flex items-center justify-between gap-3 text-sm text-rose-600">
+            <span>{loadError}</span>
+            <button type="button" className="font-bold text-primary" onClick={() => void fetchNotifs()}>
+              Retry
+            </button>
+          </Card>
+        )}
+        {!loading && !loadError && filteredNotifs.length === 0 && (
+          <Card className="p-6 text-sm text-muted-purple">
+            {notifications.length === 0
+              ? 'You have no notifications yet.'
+              : 'No notifications match this filter.'}
+          </Card>
+        )}
+        {!loading && !loadError && filteredNotifs.map((item) => (
           <Card
             key={item.id}
             className={`p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${
@@ -106,12 +165,22 @@ export const NotificationsPage: React.FC = () => {
             <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-center">
               {!item.read && (
                 <button
-                  onClick={() => handleMarkRead(item.id)}
+                  disabled={actionBusy}
+                  onClick={() => void handleMarkRead(item.id)}
                   className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-[#1E163B] border border-subtle text-primary hover:bg-primary-subtle"
                 >
                   Mark Read
                 </button>
               )}
+              <button
+                type="button"
+                aria-label={`Delete notification: ${item.title}`}
+                disabled={actionBusy}
+                onClick={() => void handleDelete(item.id)}
+                className="rounded-xl border border-subtle p-2 text-muted-purple hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
               {item.actionUrl && (
                 <Button
                   size="sm"

@@ -7,14 +7,13 @@ import {
   Moon,
   Menu,
   User as UserIcon,
-  CheckCircle2,
   Sparkles,
   LogOut
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { INITIAL_NOTIFICATIONS } from '../../lib/mockData';
-import { cn } from '../../lib/utils';
+import { notificationsApi } from '../../lib/api/client';
+import { NotificationItem } from '../../types';
 
 interface TopBarProps {
   onToggleMobileNav: () => void;
@@ -27,7 +26,58 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const unreadCount = INITIAL_NOTIFICATIONS.filter((n) => !n.read).length;
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+
+  const loadNotifications = React.useCallback(async () => {
+    if (!user) return;
+    setLoadingNotifications(true);
+    try {
+      const [items, unread] = await Promise.all([
+        notificationsApi.getNotifications(),
+        notificationsApi.getUnreadCount(),
+      ]);
+      setNotifications(items);
+      setUnreadCount(unread);
+      setNotificationError(null);
+    } catch (cause) {
+      setNotificationError(cause instanceof Error ? cause.message : 'Unable to load notifications.');
+    } finally {
+      setLoadingNotifications(false);
+    }
+  }, [user]);
+
+  React.useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setNotificationError(null);
+      return;
+    }
+    void loadNotifications();
+    const refresh = () => void loadNotifications();
+    window.addEventListener('taskora:notifications-updated', refresh);
+    const interval = window.setInterval(refresh, 60000);
+    return () => {
+      window.removeEventListener('taskora:notifications-updated', refresh);
+      window.clearInterval(interval);
+    };
+  }, [user, loadNotifications]);
+
+  const handleNotificationClick = async (item: NotificationItem) => {
+    setShowNotifications(false);
+    if (!item.read) {
+      try {
+        await notificationsApi.markRead(item.id);
+        window.dispatchEvent(new Event('taskora:notifications-updated'));
+      } catch (cause) {
+        setNotificationError(cause instanceof Error ? cause.message : 'Unable to mark this notification as read.');
+      }
+    }
+    if (item.actionUrl) navigate(item.actionUrl);
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -50,7 +100,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
 
         <div>
           <h1 className="text-xl sm:text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
-            <span>{getGreeting()}, {user?.name?.split(' ')[0] || 'Emily'}!</span>
+            <span>{getGreeting()}, {user?.name?.split(' ')[0] || 'there'}!</span>
             <span className="text-xl animate-float inline-block">👋</span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-purple mt-0.5">
@@ -61,31 +111,6 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
 
       {/* Right Top Actions */}
       <div className="flex items-center gap-2.5 sm:gap-3">
-        {/* Reference Image: AI Study Tip Card */}
-        <div className="hidden xl:flex items-center gap-2.5 px-3.5 py-1.5 rounded-2xl bg-white dark:bg-[#1E163B] border border-primary/20 shadow-lavender-sm text-xs">
-          <div className="w-6 h-6 rounded-lg bg-primary-subtle text-primary flex items-center justify-center font-bold">
-            <Sparkles className="w-3.5 h-3.5" />
-          </div>
-          <div className="leading-tight">
-            <div className="text-[10px] font-bold text-primary uppercase tracking-wide">
-              AI Study Tip
-            </div>
-            <div className="text-xs font-semibold text-deep-purple dark:text-white">
-              You learn best in short, focused sessions. Keep going!
-            </div>
-          </div>
-        </div>
-
-        {/* Reference Image: 7 Day Streak Badge */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-white dark:bg-[#1E163B] border border-subtle shadow-lavender-sm">
-          <span className="text-base">🔥</span>
-          <div className="text-left leading-tight">
-            <span className="text-xs font-bold text-deep-purple dark:text-white">
-              7 Day Streak
-            </span>
-          </div>
-        </div>
-
         {/* Search Icon Trigger */}
         <button
           onClick={() => navigate('/search')}
@@ -98,7 +123,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
         {/* Notifications Button with Badge */}
         <div className="relative">
           <button
-            onClick={() => setShowNotifications(!showNotifications)}
+            onClick={() => {
+              const next = !showNotifications;
+              setShowNotifications(next);
+              if (next) void loadNotifications();
+            }}
             className="w-10 h-10 rounded-full bg-white dark:bg-[#1E163B] border border-subtle flex items-center justify-center text-muted-purple hover:text-primary hover:border-primary/50 shadow-lavender-sm transition-all active:scale-95 relative"
             aria-label="View notifications"
           >
@@ -125,26 +154,29 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
                   View All
                 </Link>
               </div>
+              {notificationError && <p role="alert" className="py-2 text-xs text-rose-600">{notificationError}</p>}
               <div className="py-2 space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
-                {INITIAL_NOTIFICATIONS.slice(0, 3).map((item) => (
-                  <div
+                {loadingNotifications && <p role="status" className="py-3 text-center text-xs text-muted-purple">Loading notifications...</p>}
+                {!loadingNotifications && !notificationError && notifications.length === 0 && (
+                  <p className="py-3 text-center text-xs text-muted-purple">No notifications yet.</p>
+                )}
+                {notifications.slice(0, 3).map((item) => (
+                  <button
+                    type="button"
                     key={item.id}
-                    onClick={() => {
-                      setShowNotifications(false);
-                      if (item.actionUrl) navigate(item.actionUrl);
-                    }}
-                    className="p-2.5 rounded-2xl hover:bg-primary-subtle/50 cursor-pointer transition-colors flex items-start gap-3"
+                    onClick={() => void handleNotificationClick(item)}
+                    className="flex w-full items-start gap-3 rounded-2xl border-0 bg-transparent p-2.5 text-left transition-colors hover:bg-primary-subtle/50"
                   >
-                    <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-bold text-deep-purple dark:text-white">
-                        {item.title}
-                      </p>
-                      <p className="text-[11px] text-muted-purple line-clamp-2 mt-0.5">
-                        {item.message}
-                      </p>
-                    </div>
-                  </div>
+                      <div className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${item.read ? 'bg-muted-purple/30' : 'bg-primary'}`} />
+                      <div>
+                        <p className="text-xs font-bold text-deep-purple dark:text-white">
+                          {item.title}
+                        </p>
+                        <p className="text-[11px] text-muted-purple line-clamp-2 mt-0.5">
+                          {item.message}
+                        </p>
+                      </div>
+                    </button>
                 ))}
               </div>
             </div>
@@ -214,7 +246,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-left"
                 >
                   <LogOut className="w-4 h-4" />
-                  <span>Sign Out</span>
+                  <span>Logout</span>
                 </button>
               </div>
             </div>

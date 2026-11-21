@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { FocusTimerProvider } from './context/FocusTimerContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AppShell } from './components/layout/AppShell';
 
@@ -13,6 +14,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { TasksPage } from './pages/TasksPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { StudyPlannerPage } from './pages/StudyPlannerPage';
+import { FlashcardsPage } from './pages/FlashcardsPage';
 import { AIAssistantPage } from './pages/AIAssistantPage';
 import { BrainDumpPage } from './pages/BrainDumpPage';
 import { FocusPage } from './pages/FocusPage';
@@ -27,18 +29,21 @@ import { SettingsPage } from './pages/SettingsPage';
 import { ThemeStudioPage } from './pages/ThemeStudioPage';
 import { AdminPage } from './pages/AdminPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { SharedNotePage } from './pages/SharedNotePage';
 
 export const App: React.FC = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
+        <FocusTimerProvider>
+          <BrowserRouter>
+            <Routes>
             {/* Public Landing & Auth Routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/shared-notes/:shareCode" element={<SharedNotePage />} />
 
             {/* Authenticated Application Shell */}
             <Route element={<AppShell />}>
@@ -46,6 +51,7 @@ export const App: React.FC = () => {
               <Route path="/tasks" element={<TasksPage />} />
               <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/study-planner" element={<StudyPlannerPage />} />
+              <Route path="/flashcards" element={<FlashcardsPage />} />
               <Route path="/ai-assistant" element={<AIAssistantPage />} />
               <Route path="/brain-dump" element={<BrainDumpPage />} />
               <Route path="/focus" element={<FocusPage />} />
@@ -63,8 +69,9 @@ export const App: React.FC = () => {
 
             {/* 404 Not Found Catch-All */}
             <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </BrowserRouter>
+            </Routes>
+          </BrowserRouter>
+        </FocusTimerProvider>
       </AuthProvider>
     </ThemeProvider>
   );

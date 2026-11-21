@@ -1,10 +1,22 @@
-const TASK_STATUSES = new Set(["TODO", "IN_PROGRESS", "COMPLETED"]);
+const TASK_STATUSES = new Set(["TODO", "IN_PROGRESS", "IN_REVIEW", "COMPLETED"]);
 const TASK_PRIORITIES = new Set(["LOW", "MEDIUM", "HIGH"]);
-const TASK_FIELDS = new Set(["title", "description", "status", "priority", "dueDate"]);
+const TASK_FIELDS = new Set([
+    "title",
+    "description",
+    "category",
+    "tags",
+    "subtasks",
+    "status",
+    "priority",
+    "dueDate"
+]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2}))?$/;
 const MAX_TASK_TITLE_LENGTH = 120;
 const MAX_TASK_DESCRIPTION_LENGTH = 1000;
+const MAX_TASK_CATEGORY_LENGTH = 64;
+const MAX_TASK_TAGS = 20;
+const MAX_SUBTASKS = 100;
 
 function validateTaskInput(body, partial = false) {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -53,9 +65,57 @@ function validateTaskInput(body, partial = false) {
                 return { error: `Description must be ${MAX_TASK_DESCRIPTION_LENGTH} characters or fewer` };
             }
             data.description = value;
+        } else if (field === "category") {
+            if (
+                typeof value !== "string" ||
+                !value.trim() ||
+                value.trim().length > MAX_TASK_CATEGORY_LENGTH
+            ) {
+                return { error: `Category must be 1-${MAX_TASK_CATEGORY_LENGTH} characters` };
+            }
+            data.category = value.trim();
+        } else if (field === "tags") {
+            if (
+                !Array.isArray(value) ||
+                value.length > MAX_TASK_TAGS ||
+                value.some((tag) =>
+                    typeof tag !== "string" || !tag.trim() || tag.trim().length > 64
+                )
+            ) {
+                return { error: `Tags must be an array of at most ${MAX_TASK_TAGS} non-empty strings` };
+            }
+            data.tags = value.map((tag) => tag.trim());
+        } else if (field === "subtasks") {
+            if (!Array.isArray(value) || value.length > MAX_SUBTASKS) {
+                return { error: `Subtasks must be an array of at most ${MAX_SUBTASKS} items` };
+            }
+            const subtasks = [];
+            for (const subtask of value) {
+                if (
+                    !subtask ||
+                    typeof subtask !== "object" ||
+                    Array.isArray(subtask) ||
+                    Object.keys(subtask).some((key) => !["id", "title", "completed"].includes(key)) ||
+                    typeof subtask.id !== "string" ||
+                    !subtask.id.trim() ||
+                    subtask.id.length > 128 ||
+                    typeof subtask.title !== "string" ||
+                    !subtask.title.trim() ||
+                    subtask.title.trim().length > 120 ||
+                    typeof subtask.completed !== "boolean"
+                ) {
+                    return { error: "Each subtask must have a valid id, title, and completed value" };
+                }
+                subtasks.push({
+                    id: subtask.id,
+                    title: subtask.title.trim(),
+                    completed: subtask.completed
+                });
+            }
+            data.subtasks = subtasks;
         } else if (field === "status") {
             if (!TASK_STATUSES.has(value)) {
-                return { error: "Status must be TODO, IN_PROGRESS, or COMPLETED" };
+                return { error: "Status must be TODO, IN_PROGRESS, IN_REVIEW, or COMPLETED" };
             }
             data.status = value;
         } else if (field === "priority") {

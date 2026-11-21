@@ -6,6 +6,9 @@ const SAFE_TASK_SELECT = {
     id: true,
     title: true,
     description: true,
+    category: true,
+    tags: true,
+    subtasks: true,
     status: true,
     priority: true,
     dueDate: true,
@@ -105,9 +108,22 @@ function createTaskRouter(prisma, notificationService, taskService = createTaskS
                             type: "task_completed",
                             title: "Task completed",
                             message: `${updatedTask.title} was marked complete.`,
-                            actionUrl: `/tasks/${updatedTask.id}`,
-                            taskId: updatedTask.id
+                            actionUrl: "/tasks",
+                            taskId: updatedTask.id,
+                            dedupeKey: `task_completed:${req.user.id}:${updatedTask.id}`
                         }, transaction);
+                        if (transaction.xPTransaction) {
+                            await transaction.xPTransaction.createMany({
+                                data: [{
+                                    userId: req.user.id,
+                                    amount: 10,
+                                    reason: `Task completed: ${updatedTask.title}`,
+                                    source: "task_completion",
+                                    dedupeKey: `task_completion:${req.user.id}:${updatedTask.id}`
+                                }],
+                                skipDuplicates: true
+                            });
+                        }
                         return updatedTask;
                     }
 

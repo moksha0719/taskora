@@ -18,6 +18,9 @@ const { createTaskService } = require("./services/taskService");
 const { createAiConversationService } = require("./services/aiConversationService");
 const { createBrainDumpWorkflowService } = require("./services/brainDumpWorkflowService");
 const logSafeError = require("./lib/logSafeError");
+const createProductRouter = require("./routes/productRoutes");
+const { createFlashcardRouter } = require("./routes/flashcardRoutes");
+const { createProfilePhotoStorage } = require("./services/profilePhotoStorage");
 
 function createApp({
     prismaClient = prisma,
@@ -30,8 +33,12 @@ function createApp({
     studyScheduleService = defaultStudyScheduleService,
     scheduleCompletionService = defaultScheduleCompletionService,
     notificationService,
+    profilePhotoStorage,
     env = process.env
 } = {}) {
+    const photoStorage = profilePhotoStorage || createProfilePhotoStorage({
+        directory: env.PROFILE_UPLOAD_DIR || undefined
+    });
     const notifications = notificationService || createNotificationService({ prismaClient });
     const tasks = taskService || createTaskService({ prismaClient });
     const conversations = aiConversationService || createAiConversationService({
@@ -64,6 +71,11 @@ function createApp({
 
     app.use(corsPolicy.rejectUnapprovedOrigin);
     app.use(cors({ origin: corsPolicy.corsOrigin }));
+    app.use("/uploads/profile-photos", express.static(photoStorage.directory, {
+        dotfiles: "deny",
+        index: false,
+        setHeaders: (res) => res.setHeader("Cross-Origin-Resource-Policy", "cross-origin")
+    }));
     app.use(express.json({ limit: JSON_BODY_LIMIT, strict: true }));
     app.use((req, res, next) => {
         const contentLength = req.headers["content-length"];
@@ -75,12 +87,17 @@ function createApp({
         const isExplicitJsonOnlyRequest = Boolean(req.headers.authorization);
         const isJsonContentType = typeof contentType === "string" &&
             /^application\/json(?:\s*;|$)/i.test(contentType);
+        const isProfilePhotoUpload = req.method === "PUT" &&
+            req.path === "/api/auth/profile/avatar" &&
+            typeof contentType === "string" &&
+            /^image\/(?:jpeg|png|webp)(?:\s*;|$)/i.test(contentType);
 
         if (
             isWriteMethod &&
             hasBody &&
             isExplicitJsonOnlyRequest &&
-            !isJsonContentType
+            !isJsonContentType &&
+            !isProfilePhotoUpload
         ) {
             return res.status(415).json({ error: "Unsupported content type" });
         }
@@ -108,7 +125,7 @@ function createApp({
         });
     });
 
-    app.use("/api/auth", createAuthRouter(prismaClient));
+    app.use("/api/auth", createAuthRouter(prismaClient, undefined, photoStorage));
     app.use("/api/tasks", createTaskRouter(prismaClient, notifications, tasks));
     app.use("/api/ai", createAiRouter(aiService, conversations));
     app.use("/api/brain-dumps", createBrainDumpRouter(brainDumpProcessingService, brainDumps));
@@ -117,6 +134,8 @@ function createApp({
         createStudyPlanRouter(plans, studyScheduleService, scheduleCompletionService)
     );
     app.use("/api/notifications", createNotificationRouter(notifications));
+    app.use("/api/flashcards", createFlashcardRouter(prismaClient));
+    app.use("/api", createProductRouter(prismaClient));
 
     app.use((error, req, res, next) => {
         if (error && error.type === "entity.parse.failed") {

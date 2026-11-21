@@ -22,7 +22,6 @@ describe.skipIf(!BACKEND_UP)('SRS Acceptance — Phase 06 Study Planner', () => 
 
   it('TC02: create and edit a task', async () => {
     const task = await tasksApi.createTask({
-      userId: 'ignored-backend-derives-from-jwt',
       title: 'Study Distributed Systems Raft',
       dueDate: '2026-11-20',
       priority: 'high',

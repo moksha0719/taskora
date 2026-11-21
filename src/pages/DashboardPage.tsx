@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { StatCard } from '../components/common/StatCard';
 import { ProductivityChart } from '../components/dashboard/ProductivityChart';
 import { TodoWidget } from '../components/dashboard/TodoWidget';
@@ -12,7 +12,6 @@ import { ExamPrepWidget } from '../components/dashboard/ExamPrepWidget';
 import { StudyChecklistWidget } from '../components/dashboard/StudyChecklistWidget';
 import { Modal } from '../components/common/Modal';
 import { Button } from '../components/common/Button';
-import { Badge } from '../components/common/Badge';
 import {
   CheckSquare,
   Calendar,
@@ -24,8 +23,21 @@ import {
   Layers,
   GraduationCap
 } from 'lucide-react';
-import { dashboardApi, tasksApi } from '../lib/api/client';
-import { DashboardWidgetConfig, TaskPriority } from '../types';
+import { analyticsApi, dashboardApi, tasksApi } from '../lib/api/client';
+import { DashboardWidgetConfig, Task, TaskPriority } from '../types';
+
+interface DashboardMetrics {
+  completedTasks: number;
+  openTasks: number;
+  totalTasks: number;
+  focusMinutes: number;
+}
+
+function formatFocusMinutes(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
+}
 
 export const DashboardPage: React.FC = () => {
   const [widgets, setWidgets] = useState<DashboardWidgetConfig[]>(() =>
@@ -33,6 +45,35 @@ export const DashboardPage: React.FC = () => {
   );
   const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+
+  const loadDashboardMetrics = useCallback(async () => {
+    setMetricsLoading(true);
+    setMetricsError(null);
+    try {
+      const [tasks, analytics] = await Promise.all([
+        tasksApi.getTasks(),
+        analyticsApi.getAnalytics('7d'),
+      ]);
+      const completedTasks = tasks.filter((task: Task) => task.status === 'completed').length;
+      setMetrics({
+        completedTasks,
+        openTasks: tasks.length - completedTasks,
+        totalTasks: tasks.length,
+        focusMinutes: analytics.focusMinutes,
+      });
+    } catch (cause) {
+      setMetricsError(cause instanceof Error ? cause.message : 'Unable to load dashboard metrics.');
+    } finally {
+      setMetricsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDashboardMetrics();
+  }, [loadDashboardMetrics]);
 
   // New task form state
   const [taskTitle, setTaskTitle] = useState('');
@@ -50,7 +91,6 @@ export const DashboardPage: React.FC = () => {
     if (!taskTitle.trim()) return;
 
     await tasksApi.createTask({
-      userId: 'usr_emily_01',
       title: taskTitle.trim(),
       category: taskCategory,
       priority: taskPriority,
@@ -62,18 +102,16 @@ export const DashboardPage: React.FC = () => {
 
     setTaskTitle('');
     setIsCreateTaskModalOpen(false);
+    await loadDashboardMetrics();
   };
 
   return (
     <div className="space-y-7 pb-10 animate-fade-in">
       {/* Top Controls Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-muted-purple tracking-wider uppercase">
-            Personal Productivity & Study Hub
-          </span>
-          <Badge variant="primary">Synced • FR-02</Badge>
-        </div>
+        <span className="text-xs font-bold text-muted-purple tracking-wider uppercase">
+          Personal Productivity & Study Hub
+        </span>
 
         <div className="flex items-center gap-2.5">
           <Button
@@ -115,7 +153,7 @@ export const DashboardPage: React.FC = () => {
               <span>Active Study & Focus Stream</span>
             </h2>
             <span className="text-xs text-muted-purple font-medium">
-              Synchronized with AI Study Plan
+              Your tasks and study plans
             </span>
           </div>
 
@@ -144,10 +182,7 @@ export const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {/* ========================================================
-          SECTION 2: 4 PASTEL STAT CARDS
-          Tasks Done | In Progress | Completed | Focus Time
-          ======================================================== */}
+      {/* Personal productivity metrics */}
       {isWidgetEnabled('stats_overview') && (
         <section className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
@@ -157,32 +192,41 @@ export const DashboardPage: React.FC = () => {
             </h2>
           </div>
 
+          {metricsError && (
+            <div className="flex items-center justify-between gap-3 text-xs text-rose-600" role="alert">
+              <span>{metricsError}</span>
+              <button type="button" className="font-bold" onClick={() => void loadDashboardMetrics()}>
+                Retry
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
             <StatCard
-              title="Tasks Done"
-              value="24"
-              subtitle="+12% from yesterday"
+              title="Completed Tasks"
+              value={metricsLoading ? '…' : metrics?.completedTasks ?? '—'}
+              subtitle="All-time total"
               icon={CheckSquare}
               variant="purple"
             />
             <StatCard
-              title="In Progress"
-              value="8"
-              subtitle="2 active projects"
+              title="Open Tasks"
+              value={metricsLoading ? '…' : metrics?.openTasks ?? '—'}
+              subtitle="Current workload"
               icon={Calendar}
               variant="pink"
             />
             <StatCard
-              title="Completed"
-              value="56"
-              subtitle="This month total"
+              title="Total Tasks"
+              value={metricsLoading ? '…' : metrics?.totalTasks ?? '—'}
+              subtitle="In your account"
               icon={Flag}
               variant="mint"
             />
             <StatCard
-              title="Focus Time"
-              value="18h"
-              subtitle="+4h from last week"
+              title="Focus Time (7d)"
+              value={metricsLoading ? '…' : metrics ? formatFocusMinutes(metrics.focusMinutes) : '—'}
+              subtitle="Recorded sessions"
               icon={Star}
               variant="peach"
             />
@@ -209,7 +253,6 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Widget Layout Customizer Modal (FR-02 & FR-18) */}
       <WidgetCustomizeModal
         isOpen={isCustomizeModalOpen}
         onClose={() => setIsCustomizeModalOpen(false)}
