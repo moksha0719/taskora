@@ -10,7 +10,19 @@
     "db:generate": "prisma generate && tsc --project tsconfig.prisma.json",
     "db:validate": "prisma validate",
     "db:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
-    "test": "node --test"
+    "db:status": "prisma migrate status --schema=prisma/schema.prisma",
+    "db:test:diff-schema": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
+    "db:test:up": "node scripts/test-postgres.js up",
+    "db:test:verify": "node scripts/test-postgres.js verify",
+    "db:test:migrate": "node scripts/test-postgres.js migrate",
+    "db:test:status": "node scripts/test-postgres.js status",
+    "db:test:diff": "node scripts/test-postgres.js diff",
+    "db:test:generate": "node scripts/test-postgres.js generate",
+    "db:test:validate": "node scripts/test-postgres.js validate",
+    "db:test:down": "node scripts/test-postgres.js down",
+    "test": "node scripts/test-postgres.js unit",
+    "test:integration": "node scripts/test-postgres.js integration",
+    "test:all": "node scripts/test-postgres.js all"
   },
   "keywords": [],
   "author": "",
@@ -32,5 +44,8 @@
     "nodemon": "3.1.11",
     "prisma": "7.10.1",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "effect": "3.22.1"
   }
 }

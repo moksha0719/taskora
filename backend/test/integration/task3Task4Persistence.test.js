@@ -180,13 +180,22 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
     };
     const app = createApp({ prismaClient: prisma, aiService, brainDumpProcessingService });
     const server = await listen(app);
+    const testUserIds = [];
     t.after(async () => {
-        await close(server.server);
-        await prisma.$disconnect();
+        try {
+            await close(server.server);
+            if (testUserIds.length > 0) {
+                await prisma.user.deleteMany({ where: { id: { in: testUserIds } } });
+            }
+        } finally {
+            await prisma.$disconnect();
+        }
     });
 
     const userA = await createUser(server.baseUrl, "task34-a");
+    testUserIds.push(userA.user.id);
     const userB = await createUser(server.baseUrl, "task34-b");
+    testUserIds.push(userB.user.id);
 
     const conversationResponse = await request(
         server.baseUrl,
@@ -603,7 +612,10 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
             "20261115162629_init_user_task_models",
             "20261116153600_add_study_planner",
             "20261116190000_add_notifications",
-            "20261117101500_add_ai_and_brain_dump_workflows"
+            "20261117101500_add_ai_and_brain_dump_workflows",
+            "20261118160000_add_product_persistence",
+            "20261120140000_preserve_task_data_and_cascade_accounts",
+            "20261120143000_validate_focus_session_completion"
         ]
     );
 
@@ -796,4 +808,24 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
     } finally {
         await freshClient.$disconnect();
     }
+
+    const accountDeletionTask = await request(
+        server.baseUrl,
+        "POST",
+        "/api/tasks",
+        userA.token,
+        { title: "Removed with account" }
+    );
+    assert.equal(accountDeletionTask.response.status, 201);
+    const accountDeletion = await request(
+        server.baseUrl,
+        "DELETE",
+        "/api/auth/account",
+        userA.token
+    );
+    assert.equal(accountDeletion.response.status, 204);
+    assert.equal(
+        await prisma.task.count({ where: { userId: userA.user.id } }),
+        0
+    );
 });

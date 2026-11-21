@@ -10,16 +10,30 @@ import { cn } from '../lib/utils';
 export const AchievementsPage: React.FC = () => {
   const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [transactions, setTransactions] = useState<XPTransaction[]>([]);
+  const [xpTotal, setXpTotal] = useState(0);
+  const [currentLevel, setCurrentLevel] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    gamificationApi.getAchievements().then(setAchievements);
-    gamificationApi.getXPTransactions().then(setTransactions);
+    Promise.all([
+      gamificationApi.getAchievements(),
+      gamificationApi.getXPTransactions(),
+      gamificationApi.getSummary(),
+    ]).then(([achievementData, transactionData, summary]) => {
+      setAchievements(achievementData);
+      setTransactions(transactionData);
+      setXpTotal(summary.xpTotal);
+      setCurrentLevel(summary.level);
+    }).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : 'Unable to load achievements.');
+    }).finally(() => setLoading(false));
   }, []);
 
-  const currentLevel = 5;
-  const currentXP = 1450;
-  const nextLevelXP = 2000;
-  const xpPercentage = Math.round((currentXP / nextLevelXP) * 100);
+  const levelBase = (currentLevel - 1) * 500;
+  const xpInLevel = Math.max(0, xpTotal - levelBase);
+  const nextLevelXP = currentLevel * 500;
+  const xpPercentage = Math.min(100, Math.round((xpInLevel / 500) * 100));
 
   const getBadgeIcon = (iconName: string) => {
     switch (iconName) {
@@ -43,16 +57,23 @@ export const AchievementsPage: React.FC = () => {
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
           <span>Achievements & Scholar XP</span>
-          <Badge variant="peach">FR-09 Gamification</Badge>
         </h2>
         <p className="text-xs text-muted-purple mt-0.5">
           Level up your study rituals. XP awards are audited, traceable, and protected against duplicates.
         </p>
       </div>
 
+      {loading && (
+        <Card className="p-5 text-sm text-muted-purple">Loading your achievements...</Card>
+      )}
+      {error && (
+        <Card className="p-5 text-sm text-rose-600">{error}</Card>
+      )}
+
       {/* Level & XP Banner */}
+      {!loading && !error && (
       <Card className="p-8 bg-gradient-to-r from-primary-subtle/60 via-white to-soft-pink/40 dark:from-[#1E163B] dark:to-[#2B1D3D] flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center gap-5 w-full md:w-auto">
           <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-primary to-soft-lilac text-white flex items-center justify-center text-3xl shadow-lavender flex-shrink-0">
@@ -66,7 +87,7 @@ export const AchievementsPage: React.FC = () => {
               Level {currentLevel} • Focused Scholar
             </h3>
             <p className="text-xs text-muted-purple">
-              {currentXP} / {nextLevelXP} XP to Level 6 (Master Planner)
+              {xpInLevel} / 500 XP to Level {currentLevel + 1}
             </p>
           </div>
         </div>
@@ -84,10 +105,11 @@ export const AchievementsPage: React.FC = () => {
             />
           </div>
           <span className="text-[11px] text-muted-purple block text-right">
-            550 XP needed for next milestone
+            {Math.max(0, 500 - xpInLevel)} XP needed for next milestone
           </span>
         </div>
       </Card>
+      )}
 
       {/* Badges Grid */}
       <div className="space-y-4">
@@ -96,6 +118,11 @@ export const AchievementsPage: React.FC = () => {
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {!loading && !error && achievements.length === 0 && (
+            <Card className="p-5 text-sm text-muted-purple">
+              No achievements are available yet.
+            </Card>
+          )}
           {achievements.map((ach) => {
             const isUnlocked = !!ach.unlockedAt;
 
@@ -140,7 +167,7 @@ export const AchievementsPage: React.FC = () => {
                       </span>
                     ) : (
                       <span className="text-[10px] text-muted-purple italic">
-                        Progress: {ach.targetRequirement}
+                        Progress: {ach.progress} / {ach.targetRequirement}
                       </span>
                     )}
                   </div>
@@ -151,7 +178,6 @@ export const AchievementsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* XP Audit Transaction History Table (FR-09) */}
       <Card className="p-6">
         <div className="pb-3 mb-3 border-b border-subtle flex items-center justify-between">
           <div>
@@ -174,6 +200,13 @@ export const AchievementsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-subtle/60">
+              {!loading && !error && transactions.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-6 px-3 text-center text-muted-purple">
+                    No XP transactions yet.
+                  </td>
+                </tr>
+              )}
               {transactions.map((tx) => (
                 <tr key={tx.id} className="hover:bg-primary-subtle/20 transition-colors">
                   <td className="py-2.5 px-3 text-muted-purple whitespace-nowrap">

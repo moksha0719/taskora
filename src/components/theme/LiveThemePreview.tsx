@@ -1,7 +1,6 @@
 import React from 'react';
 import { ThemeConfig } from '../../types';
 import { MascotBunny } from '../common/MascotBunny';
-import { Check, Star, Calendar } from 'lucide-react';
 
 interface LiveThemePreviewProps {
   config: ThemeConfig;
@@ -34,7 +33,7 @@ export const LiveThemePreview: React.FC<LiveThemePreviewProps> = ({ config }) =>
               color: isDark ? '#FFFFFF' : config.textColor,
             }}
           >
-            Good morning, Emily! ☁️
+            Your selected theme
           </h4>
         </div>
         {config.mascot !== 'none' && (
@@ -42,67 +41,39 @@ export const LiveThemePreview: React.FC<LiveThemePreviewProps> = ({ config }) =>
         )}
       </div>
 
-      {/* Mini Stat Cards */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      <div className="grid grid-cols-3 gap-3 mb-4">
         <div
-          className="p-3.5 rounded-2xl border flex items-center gap-3 shadow-xs"
+          className="p-3.5 rounded-2xl border shadow-xs"
           style={{
             backgroundColor: isDark ? '#1E163B' : config.surfaceColor,
             borderColor: '#E8E0FA',
           }}
         >
-          <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-white"
-            style={{
-              background: `linear-gradient(135deg, ${config.primaryColor} 0%, ${config.secondaryColor} 100%)`,
-            }}
-          >
-            <Check className="w-5 h-5 stroke-[2.5]" />
-          </div>
-          <div>
-            <div className="text-xs opacity-70">Tasks Done</div>
-            <div className="text-lg font-bold leading-tight">24</div>
-          </div>
+          <div className="w-full h-8 rounded-xl" style={{ backgroundColor: config.primaryColor }} />
+          <div className="mt-2 text-xs opacity-70">Primary color</div>
         </div>
 
         <div
-          className="p-3.5 rounded-2xl border flex items-center gap-3 shadow-xs"
+          className="p-3.5 rounded-2xl border shadow-xs"
+          style={{
+            backgroundColor: isDark ? '#1E163B' : config.backgroundColor,
+            borderColor: '#E8E0FA',
+          }}
+        >
+          <div className="w-full h-8 rounded-xl border border-subtle" style={{ backgroundColor: config.backgroundColor }} />
+          <div className="mt-2 text-xs opacity-70">Background</div>
+        </div>
+
+        <div
+          className="p-3.5 rounded-2xl border shadow-xs"
           style={{
             backgroundColor: isDark ? '#1E163B' : config.surfaceColor,
             borderColor: '#E8E0FA',
           }}
         >
-          <div className="w-10 h-10 rounded-xl bg-soft-peach flex items-center justify-center text-soft-peach-text">
-            <Star className="w-5 h-5 fill-current" />
-          </div>
-          <div>
-            <div className="text-xs opacity-70">Focus Time</div>
-            <div className="text-lg font-bold leading-tight">18h</div>
-          </div>
+          <div className="w-full h-8 rounded-xl border border-subtle" style={{ backgroundColor: config.surfaceColor }} />
+          <div className="mt-2 text-xs opacity-70">Card surface</div>
         </div>
-      </div>
-
-      {/* Mini Interactive Sample Button */}
-      <div className="flex items-center justify-between pt-2">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-4 h-4 rounded-md border flex items-center justify-center text-white text-[10px]"
-            style={{ backgroundColor: config.primaryColor, borderColor: config.primaryColor }}
-          >
-            ✓
-          </div>
-          <span className="text-xs font-medium">Design landing page 🎨</span>
-        </div>
-
-        <button
-          type="button"
-          className="px-4 py-2 rounded-full text-xs font-bold text-white shadow-sm transition-transform active:scale-95"
-          style={{
-            background: `linear-gradient(135deg, ${config.primaryColor} 0%, ${config.secondaryColor} 100%)`,
-          }}
-        >
-          Lavender Action
-        </button>
       </div>
     </div>
   );

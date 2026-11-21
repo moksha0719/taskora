@@ -4,7 +4,7 @@ import { Button } from '../common/Button';
 import { DashboardWidgetConfig } from '../../types';
 import { dashboardApi } from '../../lib/api/client';
 import { ArrowUp, ArrowDown, Eye, EyeOff, RotateCcw } from 'lucide-react';
-import { INITIAL_DASHBOARD_WIDGETS } from '../../lib/mockData';
+import { DEFAULT_DASHBOARD_WIDGETS } from '../../lib/defaults';
 
 interface WidgetCustomizeModalProps {
   isOpen: boolean;
@@ -46,9 +46,9 @@ export const WidgetCustomizeModal: React.FC<WidgetCustomizeModalProps> = ({
   };
 
   const handleReset = () => {
-    setWidgets(INITIAL_DASHBOARD_WIDGETS);
-    dashboardApi.saveWidgets(INITIAL_DASHBOARD_WIDGETS);
-    onLayoutUpdated(INITIAL_DASHBOARD_WIDGETS);
+    setWidgets(DEFAULT_DASHBOARD_WIDGETS);
+    dashboardApi.saveWidgets(DEFAULT_DASHBOARD_WIDGETS);
+    onLayoutUpdated(DEFAULT_DASHBOARD_WIDGETS);
   };
 
   return (
@@ -56,7 +56,7 @@ export const WidgetCustomizeModal: React.FC<WidgetCustomizeModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Customize Dashboard Layout"
-      description="Choose which cards to display and reorder them according to your workflow (FR-18)."
+      description="Choose which cards to display and reorder them according to your workflow."
       maxWidth="md"
     >
       <div className="space-y-2 py-2">

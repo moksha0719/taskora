@@ -150,9 +150,15 @@ function createNotificationScheduler({
     setIntervalFunction = setInterval,
     clearIntervalFunction = clearInterval,
     onError = (error) => console.error(
-        "Notification scheduler run failed:",
-        error && error.name ? error.name : "Error"
-    )
+    "Notification scheduler run failed:",
+    {
+        name: error?.name,
+        code: error?.code,
+        message: error?.message,
+        meta: error?.meta,
+        clientVersion: error?.clientVersion
+    }
+)
 } = {}) {
     let timer = null;
     let activeRun = null;
@@ -163,7 +169,7 @@ function createNotificationScheduler({
             where: {
                 status: { not: "COMPLETED" },
                 dueDate: {
-                    gt: now,
+                    gte: new Date(now.getTime() - TASK_DUE_WINDOW_MS),
                     lte: new Date(now.getTime() + TASK_DUE_WINDOW_MS)
                 }
             },
@@ -205,12 +211,15 @@ function createNotificationScheduler({
 
         let createdCount = 0;
         for (const task of tasks) {
+            const overdue = task.dueDate.getTime() < now.getTime();
             const result = await notificationService.createNotification({
                 userId: task.userId,
                 type: "task_due",
-                title: "Task due soon",
-                message: `${task.title} is due within 24 hours.`,
-                actionUrl: `/tasks/${task.id}`,
+                title: overdue ? "Task overdue" : "Task due soon",
+                message: overdue
+                    ? `${task.title} is overdue.`
+                    : `${task.title} is due within 24 hours.`,
+                actionUrl: "/tasks",
                 dedupeKey: `task_due:${task.id}:${task.dueDate.toISOString()}`,
                 taskId: task.id
             });
@@ -228,7 +237,7 @@ function createNotificationScheduler({
                 type: "study_reminder",
                 title: "Study session coming up",
                 message: `${item.subject.name} starts in 15 minutes.`,
-                actionUrl: `/study-plans/${plan.id}`,
+                actionUrl: "/study-planner",
                 dedupeKey: `study_reminder:${item.id}:${occurrence.occurrenceDate}`,
                 scheduleItemId: item.id
             });

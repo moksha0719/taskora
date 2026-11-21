@@ -4,7 +4,7 @@
 
 Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-> **Project status:** The frontend uses the Phase 06 APIs for registration, login, study-plan CRUD, calendar data, schedule persistence, and completion history. Most other frontend features remain prototypes backed by mock data and browser `localStorage`. Plans cannot be activated through the current API.
+> **Project status:** Authentication, tasks, notifications, AI/Brain Dump, Study Planner, flashcards, habits, notes, focus sessions, study rooms, gamification summaries, analytics and search have owner-scoped API adapters. Password recovery uses persisted, expiring, single-use tokens; real email delivery requires Resend credentials or a configured delivery webhook. Study rooms use persisted shared timers with same-process SSE events and client polling fallback. Cross-replica real-time delivery requires pub/sub configuration.
 
 ## Current features and prototype scope
 
@@ -12,22 +12,23 @@ The existing frontend describes these screens and interactions:
 
 | Requirement | Route | Frontend scope |
 |---|---|---|
-| **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Registration and login use the backend JWT API. Password reset is still UI-only. |
+| **FR-01 Authentication** | `/login`, `/register`, `/forgot-password` | Registration/login use JWT. Password recovery uses persisted, expiring, single-use reset tokens and a configurable email provider or webhook. |
 | **FR-02 Dashboard** | `/dashboard` | Four pastel stat cards, productivity chart, quick-add to-do list, mini calendar, recent activity, and bunny motivation card. |
-| **FR-03 AI Assistant** | `/ai-assistant` | Conversation UI and structured proposals with approve/edit/reject review actions. The backend supports persistent conversations and task proposals with explicit approval/rejection; the frontend flow is not integrated. |
-| **FR-04 Task Management** | `/tasks` | List and Kanban views, priority badges, category filters, subtasks, and bulk operations. |
-| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, calendar data, schedule previews and persistence, and completion actions/history. The backend also supports plan activation/deactivation, but the frontend does not expose those operations. |
-| **FR-06 Focus Mode** | `/focus` | Circular 25/5 Pomodoro timer, subject label, ambient sound simulation, and Zen mode. |
-| **FR-07 Habit Tracker** | `/habits` | Single-click check-ins, streak display, and 28-day activity history. |
+| **FR-03 AI Assistant** | `/ai-assistant` | Persistent conversations and structured task proposals; proposals require explicit approval or rejection. |
+| **FR-04 Task Management** | `/tasks` | Backend-backed list, create, edit, completion and delete operations. |
+| **FR-05 Smart Study Planner** | `/study-planner`, `/calendar` | Backend-backed plan CRUD, calendar data, schedule previews, completion history and activation/deactivation operations. |
+| **FR-06 Focus Mode** | `/focus` | Configurable Pomodoro timer shared with the dashboard and restored from per-user session storage; completion is recorded once by the server before XP is awarded. |
+| **FR-07 Habit Tracker** | `/habits` | Persisted habits and date check-ins through owner-scoped APIs. |
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
 | **FR-09 Gamification** | `/achievements` | Scholar levels, XP progress, badges, and transaction-style history UI. |
-| **FR-10 Study Workspace** | `/workspace` | Subject-organized notes and editor UI with private-by-default and sharing controls. |
-| **FR-11 Brain Dump** | `/brain-dump` | Quick thought capture and an AI organization proposal flow. The backend persists Brain Dumps and proposed tasks; tasks are created only after explicit approval. The frontend is not integrated. |
-| **FR-12 Virtual Study Rooms** | `/study-rooms` | Public/private room UI, passcode flow, synchronized timer, participants, and quiet chat. |
-| **FR-13 Notifications** | `/notifications` | Notification center UI for deadline, habit, room, and achievement alerts. |
+| **FR-10 Study Workspace** | `/workspace` | Persisted private-by-default notes through owner-scoped APIs. |
+| **FR-11 Brain Dump** | `/brain-dump` | Persistent quick capture and AI organization; proposed tasks are created only after explicit approval. |
+| **FR-12 Virtual Study Rooms** | `/study-rooms` | Persisted room creation, passcode-protected join, owner-only edit/delete/timer controls, leave actions, and SSE with polling fallback. Cross-replicas delivery requires pub/sub. |
+| **Flashcards** | `/flashcards` | Owner-scoped deck/card management with persisted SM-2 review scheduling. |
+| **FR-13 Notifications** | `/notifications` | Backend-backed notification center with read/read-all, deletion actions, synchronized unread count, and visible request errors. |
 | **FR-14 Search and Filter** | `/search` | Search UI for tasks, notes, and habits with filter tabs. |
 | **FR-15 Profile and Settings** | `/settings` | Profile/degree details, privacy controls, password-management UI, and JSON export option. |
-| **FR-16 Administration** | `/admin` | Admin-style overview, student directory, moderation queue, and audit-log UI; this is not server-side authorization. |
+| **FR-16 Administration** | `/admin` | Admin metrics, moderation queue, and audit-log UI. Backend admin endpoints enforce the `ADMIN` role; user-directory and role-management APIs are not implemented. |
 | **FR-17 Theme Management** | `/theme-studio` | Lavender, Mint, Peach, Midnight, and Bubblegum palettes; custom colors, contrast warnings, and live preview. |
 | **FR-18 Dashboard Personalization** | `/dashboard` | Widget visibility and ordering controls with browser persistence. |
 | **FR-19 Decorative Personalization** | `/theme-studio` | Mascot options (Bunny, Kitten, Bear, None) and decoration toggle. |
@@ -51,25 +52,25 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Frontend | React 18, TypeScript, Vite, React Router | Present |
 | Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
 | Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
-| Frontend data layer | Typed API client plus mock APIs and browser `localStorage` | Authentication and Phase 06 study planning use Express; other prototype features remain mocked |
+| Frontend data layer | Typed API client plus browser `localStorage` preferences | Authentication, tasks, Study Planner, AI/Brain Dump, notifications and product data use Express; theme/dashboard preferences remain browser-local |
 | Backend | Node.js, Express, CORS, dotenv | Authenticated API routes present |
 | Database | PostgreSQL | Prisma-backed schema and migrations present |
 | ORM | Prisma | Configured in `backend/` |
 | Authentication | bcrypt password hashing and JWT | Backend-backed registration and login |
-| AI integration | Google Gemini through the backend | Assistant, persistent conversation/proposal, and Brain Dump endpoints present; frontend proposal flow remains local |
+| AI integration | Google Gemini through the backend | Assistant conversations/proposals and Brain Dump processing use authenticated backend APIs; the active conversation identifier is stored in session storage. Gemini endpoints require server-side provider configuration. |
 
 ## Architecture
 
 ### Current implementation
 
 1. The browser runs the React application using Vite.
-2. Authentication, Study Planner, CalendarPage, and the dashboard semester calendar call the typed API client in `src/lib/api/client.ts`, which sends the JWT to the Express API.
-3. Other prototype features still use mock data, simulated delays, and browser `localStorage`.
-4. The Express server exposes authentication and feature routes backed by Prisma and PostgreSQL.
+2. Authentication, tasks, Study Planner, calendar, AI/Brain Dump, notifications, and persisted product modules call the typed API client in `src/lib/api/client.ts`, which sends the JWT to the Express API.
+3. Product data is owner-scoped through the Express API where implemented. Theme and dashboard preferences remain browser-local.
+4. The Express server exposes authentication and persisted feature routes backed by Prisma and PostgreSQL.
 
-### Planned architecture
+### Remaining architecture work
 
-The data flow is in use for authentication and study planning; other features are still prototypes:
+Some visual personalization and cross-device preference synchronization remain local-only:
 
 `React UI → typed frontend API client → Express routes/controllers/services → Prisma → PostgreSQL`
 
@@ -99,8 +100,8 @@ taskora/
 │   │   └── theme/                # Theme preview and contrast UI
 │   ├── context/                  # JWT authentication and theme contexts
 │   ├── lib/
-│   │   ├── api/                  # Typed backend client and remaining mock APIs
-│   │   └── mockData.ts
+│   │   ├── api/                  # Typed backend client
+│   │   └── defaults.ts           # Default theme and dashboard preferences
 │   ├── pages/                    # App routes and page components
 │   ├── styles/                   # Global CSS and design tokens
 │   ├── types/                    # Shared TypeScript types
@@ -122,7 +123,7 @@ taskora/
 - Node.js 22 LTS and npm for backend development (the backend Docker image uses Node 22).
 - npm
 - Docker Desktop with the Compose plugin for the containerized backend and PostgreSQL, or a local PostgreSQL installation.
-- The frontend prototype can run independently; backend-backed authentication and Study Planner features require the API and database.
+- The frontend shell can start independently, but authentication and persisted product features require the API and PostgreSQL database.
 
 ## Installation and setup
 
@@ -144,11 +145,11 @@ The root [.env.example](./.env.example) contains frontend settings. Backend secr
 
 Create a root `.env` for local Vite settings as needed. The existing example names `VITE_HOST`, `VITE_PORT`, and `VITE_API_BASE_URL`. Variables prefixed with `VITE_` are intended for frontend use and may be included in browser code; **never put secrets in them**.
 
-Authentication and Study Planner requests use this API base URL. Other prototype features still use mock APIs and local storage.
+Authentication, tasks, Study Planner, AI/Brain Dump, notifications and product APIs use this API base URL. Theme and dashboard preferences remain browser-local.
 
 ### Backend
 
-The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. Create `backend/.env` from the backend example before starting the API. The Compose setup requires the PostgreSQL, `JWT_SECRET`, and `DATABASE_URL` values shown in that example. Gemini-powered features also need `GEMINI_API_KEY`; `GEMINI_MODEL` is optional. These settings are server-only:
+The server calls `dotenv.config()` and reads `.env` relative to the backend process's working directory. Create `backend/.env` from the backend example before starting the API. The Compose setup requires the PostgreSQL, `JWT_SECRET`, and `DATABASE_URL` values shown in that example. Gemini-powered features require both `GEMINI_API_KEY` and `GEMINI_MODEL`; neither is needed for server startup. Local password-reset delivery defaults to a non-sending mock; production requires a configured provider. These settings are server-only:
 
 ```dotenv
 POSTGRES_DB=taskora_db
@@ -158,9 +159,13 @@ DATABASE_URL=postgresql://<local-user>:<password>@postgres:5432/taskora_db?schem
 JWT_SECRET=<random-secret-of-at-least-32-bytes>
 GEMINI_API_KEY=<your-provider-key>
 GEMINI_MODEL=<supported-model-name>
+EMAIL_PROVIDER=mock
+EMAIL_FROM=no-reply@example.invalid
+EMAIL_FROM_NAME=Taskora
+PASSWORD_RESET_URL=http://localhost:5173/forgot-password
 ```
 
-These are variable names and placeholders, not working credentials; use the checked-in [`backend/.env.example`](./backend/.env.example) as the template. Do not commit `.env` files. Keep `DATABASE_URL`, `JWT_SECRET`, and AI provider keys out of frontend variables and client-side code.
+For real password-reset delivery, select `EMAIL_PROVIDER=resend` and configure `EMAIL_API_KEY`, a provider-verified `EMAIL_FROM`, `EMAIL_FROM_NAME`, and the deployed HTTPS `PASSWORD_RESET_URL`; alternatively configure the existing webhook provider. The checked-in [`backend/.env.example`](./backend/.env.example) contains names and placeholders, not working credentials. Do not commit `.env` files. Keep database credentials, `JWT_SECRET`, email provider keys, and AI provider keys out of frontend variables and client-side code. See the [backend external-service setup](./backend/README.md#external-service-integrations) for details.
 
 ## Running the application
 
@@ -210,6 +215,11 @@ For containerized local development:
 
 Use a separate database for tests and production. Never put real database credentials in source files or commit them.
 
+The backend integration suite uses a dedicated PostgreSQL 16 Compose project,
+database, restricted test role, and loopback-only port. Its setup, migration,
+verification, test, and shutdown commands are documented in the
+[isolated PostgreSQL test setup](./backend/README.md#isolated-postgresql-integration-tests).
+
 ### Production migration sequence
 
 The backend exposes a one-shot production migration command:
@@ -252,12 +262,14 @@ The backend exposes these API areas:
 | `GET` | `/api/auth/me` | Resolve the authenticated user. |
 | `*` | `/api/study-plans/*` | Study-plan CRUD, schedule preview, and completion operations; see [Phase 06 API contract](./docs/phase06-api-contract.md). |
 | `*` | `/api/tasks/*`, `/api/ai/*`, `/api/brain-dumps/*`, `/api/notifications/*` | Task, AI, Brain Dump, and notification APIs. |
+| `*` | `/api/habits/*`, `/api/notes/*`, `/api/focus/*`, `/api/study-rooms/*` | Persisted habits, notes, timed focus sessions, and study rooms. |
+| `*` | `/api/gamification`, `/api/analytics`, `/api/search`, `/api/admin/*`, `/api/reports` | XP summaries, analytics, unified search, moderation, and role-protected admin operations. |
 
 Local base URL: `http://localhost:5000`. The frontend API base URL is configured with `VITE_API_BASE_URL`.
 
 ### Frontend integration gaps
 
-Additional frontend features still use mock APIs or browser storage, including notifications. Request and response schemas, authentication requirements, error formats, and endpoint examples are documented in the backend API contracts; do not treat planned frontend integrations as available.
+Implemented frontend integrations use the documented backend contracts. Remaining browser-local preferences and any explicitly documented prototype limitations are not server-backed until an endpoint is implemented.
 
 ## Testing and acceptance scenarios
 
@@ -269,20 +281,20 @@ The original README listed the following SRS acceptance scenarios. They are reta
 - **TC02 Task CRUD:** create, complete, edit, filter, and delete tasks; completion may trigger confetti.
 - **TC03 AI task request:** turn a natural-language request into a structured proposal.
 - **TC04 Approve AI proposal:** only save a proposed action after explicit approval.
-- **TC05 Focus mode:** run a configurable timer, record a session, and award XP.
+- **TC05 Focus mode:** run a configurable timer, complete a server-timed session, and award XP once.
 - **TC06 Habit check-in:** update a daily streak while retaining historical check-ins.
 - **TC07 Study plan:** create a plan, generate a preview from explicit availability windows, and test saved-item completion endpoints.
 - **TC08 Brain Dump:** capture unstructured text and propose an organized result.
 - **TC09 Gamification:** attribute XP to its source and avoid duplicate awards.
 - **TC10 Study rooms:** validate a private-room passcode before joining.
 - **TC11 Analytics:** calculate focus-time and completion metrics for charts.
-- **TC12 Authorization:** protect admin operations by role on the server (planned).
+- **TC12 Authorization:** protect admin operations by role on the server.
 - **TC13 Theme preferences:** persist custom colors, card borders, and dark mode.
 - **TC14 Dashboard customization:** persist widget visibility and ordering.
 
 ## Next steps
 
-The backend provides authentication, task, AI Assistant, Brain Dump, Study Planner, and notification APIs. Authentication and Study Planner are integrated with the frontend; other prototype features still use mock data. Remaining work includes integrating those features with their APIs and validating deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
+The backend provides authentication, task, AI Assistant, Brain Dump, Study Planner, notification, habits, notes, focus, rooms, gamification, analytics and search APIs. Password recovery requires a configured delivery webhook. Room SSE synchronization is single-process and needs pub/sub for multiple replicas. Validate database-backed integrations and deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
 
 ## Team contribution overview
 

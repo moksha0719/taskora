@@ -14,27 +14,44 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [quickTitle, setQuickTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    tasksApi.getTasks().then((allTasks) => {
-      // Prioritize today's tasks
-      setTasks(allTasks.slice(0, 5));
-    });
+    let active = true;
+    tasksApi.getTasks()
+      .then((allTasks) => {
+        if (active) setTasks(allTasks.slice(0, 5));
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load your tasks.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleToggle = async (taskId: string) => {
-    const updated = await tasksApi.toggleTaskCompleted(taskId);
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? updated : t))
-    );
+    setError(null);
+    try {
+      const updated = await tasksApi.toggleTaskCompleted(taskId);
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? updated : t))
+      );
 
-    if (updated.status === 'completed') {
-      confetti({
-        particleCount: 25,
-        spread: 40,
-        origin: { y: 0.8 },
-        colors: ['#9885E8', '#C7B9F5', '#F7DDED', '#DDF3E9'],
-      });
+      if (updated.status === 'completed') {
+        confetti({
+          particleCount: 25,
+          spread: 40,
+          origin: { y: 0.8 },
+          colors: ['#9885E8', '#C7B9F5', '#F7DDED', '#DDF3E9'],
+        });
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to update this task.');
     }
   };
 
@@ -42,20 +59,24 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
     e.preventDefault();
     if (!quickTitle.trim()) return;
 
-    const newTask = await tasksApi.createTask({
-      userId: 'usr_emily_01',
-      title: quickTitle.trim(),
-      dueDate: new Date().toISOString().split('T')[0],
-      priority: 'medium',
-      status: 'todo',
-      category: 'General',
-      tags: ['QuickAdd'],
-      subtasks: [],
-    });
+    setError(null);
+    try {
+      const newTask = await tasksApi.createTask({
+        title: quickTitle.trim(),
+        dueDate: new Date().toISOString().split('T')[0],
+        priority: 'medium',
+        status: 'todo',
+        category: 'General',
+        tags: ['QuickAdd'],
+        subtasks: [],
+      });
 
-    setTasks((prev) => [newTask, ...prev.slice(0, 4)]);
-    setQuickTitle('');
-    setIsAdding(false);
+      setTasks((prev) => [newTask, ...prev.slice(0, 4)]);
+      setQuickTitle('');
+      setIsAdding(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to create this task.');
+    }
   };
 
   return (
@@ -102,8 +123,14 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
         </form>
       )}
 
+      {error && <p className="mb-3 text-xs text-rose-600" role="alert">{error}</p>}
+
       {/* Tasks List */}
       <div className="space-y-2.5">
+        {loading && <p className="py-4 text-center text-xs text-muted-purple" role="status">Loading tasks...</p>}
+        {!loading && !error && tasks.length === 0 && (
+          <p className="py-4 text-center text-xs text-muted-purple">No tasks yet. Add a task to get started.</p>
+        )}
         {tasks.map((task) => {
           const isDone = task.status === 'completed';
           return (

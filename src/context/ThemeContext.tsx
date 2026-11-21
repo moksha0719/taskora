@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeConfig, ThemePresetId, MascotType } from '../types';
 import { themeApi } from '../lib/api/client';
-import { INITIAL_THEME_CONFIG } from '../lib/mockData';
 
 export const THEME_PRESETS: Record<ThemePresetId, Partial<ThemeConfig> & { name: string; description: string }> = {
   lavender: {

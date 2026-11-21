@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { ProposalCard } from '../components/ai/ProposalCard';
 import { BrainDumpEntry, AIProposal } from '../types';
-import { brainDumpApi, aiApi } from '../lib/api/client';
+import { brainDumpApi } from '../lib/api/client';
 import { Lightbulb, Sparkles, Send, CheckCircle2, Clock, Trash2 } from 'lucide-react';
 import { MascotBunny } from '../components/common/MascotBunny';
 
@@ -12,15 +12,25 @@ export const BrainDumpPage: React.FC = () => {
   const [entries, setEntries] = useState<BrainDumpEntry[]>([]);
   const [rawText, setRawText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [activeProposal, setActiveProposal] = useState<AIProposal | null>(null);
+  const [activeBrainDumpId, setActiveBrainDumpId] = useState<string | null>(null);
 
   const fetchEntries = async () => {
-    const data = await brainDumpApi.getEntries();
-    setEntries(data);
+    setIsFetching(true);
+    setFetchError(null);
+    try {
+      setEntries(await brainDumpApi.getEntries());
+    } catch (cause) {
+      setFetchError(cause instanceof Error ? cause.message : 'Unable to load captured entries.');
+    } finally {
+      setIsFetching(false);
+    }
   };
 
   useEffect(() => {
-    fetchEntries();
+    void fetchEntries();
   }, []);
 
   const handleCapture = async (e: React.FormEvent) => {
@@ -37,6 +47,7 @@ export const BrainDumpPage: React.FC = () => {
     try {
       const proposal = await brainDumpApi.convertToProposal(entry.id);
       setActiveProposal(proposal);
+      setActiveBrainDumpId(entry.id);
       fetchEntries();
     } finally {
       setLoading(false);
@@ -47,11 +58,8 @@ export const BrainDumpPage: React.FC = () => {
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+        <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
           <span>Brain Dump</span>
-          <span className="text-xs px-2.5 py-0.5 rounded-full bg-soft-peach text-soft-peach-text font-bold">
-            FR-11 Quick Capture
-          </span>
         </h2>
         <p className="text-xs text-muted-purple mt-0.5">
           Friction-free space to dump chaotic ideas, to-dos, or notes. Click "Organize with AI" to transform them into reviewable task proposals.
@@ -93,12 +101,16 @@ export const BrainDumpPage: React.FC = () => {
           <ProposalCard
             proposal={activeProposal}
             onApprove={async (id) => {
-              await aiApi.approveProposal(id);
+              if (activeBrainDumpId) await brainDumpApi.approveProposal(activeBrainDumpId, id);
               setActiveProposal(null);
+              setActiveBrainDumpId(null);
+              fetchEntries();
             }}
             onReject={async (id) => {
-              await aiApi.rejectProposal(id);
+              if (activeBrainDumpId) await brainDumpApi.rejectProposal(activeBrainDumpId, id);
               setActiveProposal(null);
+              setActiveBrainDumpId(null);
+              fetchEntries();
             }}
           />
         </div>
@@ -112,7 +124,21 @@ export const BrainDumpPage: React.FC = () => {
           </h3>
         </div>
 
-        {entries.map((entry) => (
+        {isFetching && <Card role="status" className="p-5 text-sm text-muted-purple">Loading captured entries...</Card>}
+        {fetchError && (
+          <Card role="alert" className="p-5 flex items-center justify-between gap-3 text-sm text-rose-600">
+            <span>{fetchError}</span>
+            <button type="button" className="font-bold text-primary" onClick={() => void fetchEntries()}>
+              Retry
+            </button>
+          </Card>
+        )}
+        {!isFetching && !fetchError && entries.length === 0 && (
+          <Card className="p-6 text-sm text-muted-purple">
+            No captured thoughts yet. Add one above to get started.
+          </Card>
+        )}
+        {!isFetching && !fetchError && entries.length > 0 && entries.map((entry) => (
           <Card key={entry.id} className="p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1.5 min-w-0 flex-1">
               <div className="flex items-center gap-2">

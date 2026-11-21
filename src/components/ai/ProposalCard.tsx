@@ -8,7 +8,7 @@ import confetti from 'canvas-confetti';
 
 interface ProposalCardProps {
   proposal: AIProposal;
-  onApprove: (proposalId: string) => Promise<void>;
+  onApprove: (proposalId: string) => Promise<boolean | void>;
   onReject: (proposalId: string) => Promise<void>;
   onEdit?: (proposal: AIProposal) => void;
 }
@@ -25,13 +25,15 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
   const handleApprove = async () => {
     setLoading(true);
     try {
-      await onApprove(proposal.id);
-      confetti({
-        particleCount: 30,
-        spread: 50,
-        origin: { y: 0.7 },
-        colors: ['#9885E8', '#DDF3E9', '#FEF3D6'],
-      });
+      const approved = await onApprove(proposal.id);
+      if (approved !== false) {
+        confetti({
+          particleCount: 30,
+          spread: 50,
+          origin: { y: 0.7 },
+          colors: ['#9885E8', '#DDF3E9', '#FEF3D6'],
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -55,9 +57,6 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
-              AI Action Proposal (FR-03)
-            </span>
             <h4 className="text-sm font-bold text-deep-purple dark:text-white font-heading">
               {proposal.title}
             </h4>
@@ -71,6 +70,9 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
         )}
         {proposal.status === 'rejected' && (
           <Badge variant="pink">Rejected</Badge>
+        )}
+        {proposal.status === 'expired' && (
+          <Badge variant="muted">Expired</Badge>
         )}
         {proposal.status === 'pending' && (
           <Badge variant="peach">Pending Your Review</Badge>
@@ -116,7 +118,7 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
         ))}
       </div>
 
-      {/* Review & Commitment Controls (FR-03 & AI Principle: Nothing is saved until confirmed!) */}
+      {/* Review & Commitment Controls (AI principle: nothing is saved until confirmed.) */}
       {isPending ? (
         <div className="flex items-center justify-between pt-2 border-t border-subtle">
           <span className="text-[11px] text-muted-purple italic">
@@ -160,7 +162,11 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
       ) : (
         <div className="text-right">
           <span className="text-[11px] text-muted-purple">
-            {proposal.status === 'approved' ? 'Committed to your tasks list.' : 'Proposal was declined.'}
+            {proposal.status === 'approved'
+              ? 'Committed to your tasks list.'
+              : proposal.status === 'expired'
+                ? 'This proposal expired and can no longer be applied.'
+                : 'Proposal was declined.'}
           </span>
         </div>
       )}

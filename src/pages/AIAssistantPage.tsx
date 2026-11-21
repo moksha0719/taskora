@@ -1,16 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { ProposalCard } from '../components/ai/ProposalCard';
 import { MascotBunny } from '../components/common/MascotBunny';
 import { aiApi } from '../lib/api/client';
-import { AIProposal, ChatMessage } from '../types';
-import { Bot, Send, Sparkles, User, RefreshCw, CheckCircle2 } from 'lucide-react';
+import type { AIConversationSummary } from '../lib/api/client';
+import type { ChatMessage } from '../types';
+import { Bot, Send, Sparkles, User, Plus } from 'lucide-react';
 
 export const AIAssistantPage: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversations, setConversations] = useState<AIConversationSummary[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [inputPrompt, setInputPrompt] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingConversation, setLoadingConversation] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const sendingRef = useRef(false);
 
   const suggestionChips = [
     'Break down my Distributed Systems exam prep into 4 tasks',
@@ -20,24 +26,72 @@ export const AIAssistantPage: React.FC = () => {
   ];
 
   useEffect(() => {
-    // Initial welcome message with pre-loaded pending proposal
-    aiApi.getProposals().then((proposals) => {
-      const initialPending = proposals.find((p) => p.status === 'pending') || proposals[0];
-      setMessages([
-        {
-          id: 'msg_welcome',
-          sender: 'assistant',
-          content: 'Hello Emily! I am your Taskora AI study strategist. Ask me to break down an assignment, design a study timetable, or organize your goals. Remember: nothing is committed to your database until you explicitly review and approve my proposal! 🌸',
-          timestamp: 'Just now',
-          proposal: initialPending,
-        },
-      ]);
-    });
+    let active = true;
+    const loadAssistant = async () => {
+      try {
+        const history = await aiApi.loadConversation();
+        if (!active) return;
+        setMessages(history);
+        setActiveConversationId(aiApi.getActiveConversationId());
+        try {
+          setConversations(await aiApi.getConversations());
+        } catch (cause: unknown) {
+          if (active) {
+            setError(cause instanceof Error ? cause.message : 'Unable to load saved conversations.');
+          }
+        }
+      } catch (cause: unknown) {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : 'Unable to load your assistant conversation.');
+        }
+      } finally {
+        if (active) setLoadingConversation(false);
+      }
+    };
+    void loadAssistant();
+    return () => {
+      active = false;
+    };
   }, []);
 
+  const handleSelectConversation = async (conversationId: string) => {
+    if (!conversationId || conversationId === activeConversationId) return;
+    setLoadingConversation(true);
+    setError(null);
+    try {
+      const history = await aiApi.loadConversation(conversationId);
+      setMessages(history);
+      setActiveConversationId(aiApi.getActiveConversationId());
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the selected conversation.');
+    } finally {
+      setLoadingConversation(false);
+    }
+  };
+
+  const handleNewConversation = async () => {
+    setLoadingConversation(true);
+    setError(null);
+    try {
+      const conversation = await aiApi.createConversation();
+      setConversations((previous) => [
+        conversation,
+        ...previous.filter((item) => item.id !== conversation.id),
+      ]);
+      setActiveConversationId(conversation.id);
+      setMessages([]);
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Unable to create a new conversation.');
+    } finally {
+      setLoadingConversation(false);
+    }
+  };
+
   const handleSend = async (textToSend?: string) => {
+    if (loading || loadingConversation || sendingRef.current) return;
     const prompt = (textToSend || inputPrompt).trim();
     if (!prompt) return;
+    sendingRef.current = true;
 
     const userMsg: ChatMessage = {
       id: `msg_u_${Date.now()}`,
@@ -49,44 +103,76 @@ export const AIAssistantPage: React.FC = () => {
     setMessages((prev) => [...prev, userMsg]);
     setInputPrompt('');
     setLoading(true);
+    setError(null);
 
     try {
-      // Generate structured proposal
-      const proposal = await aiApi.generateProposal(prompt);
+      const result = await aiApi.generateProposal(prompt);
+      setActiveConversationId(aiApi.getActiveConversationId());
       const assistantMsg: ChatMessage = {
-        id: `msg_a_${Date.now()}`,
+        id: result.assistantMessageId,
         sender: 'assistant',
-        content: `I've formulated a structured action plan for you with ${proposal.items.length} proposed steps. Please review each item below before committing it to your tasks.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        proposal,
+        content: result.response,
+        timestamp: result.timestamp,
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      const proposalMessages: ChatMessage[] = result.proposals.map((proposal) => ({
+        id: `proposal-${proposal.id}`,
+        sender: 'assistant',
+        content: 'Suggested task proposal',
+        timestamp: proposal.suggestedAt
+          ? new Date(proposal.suggestedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : result.timestamp,
+        proposal,
+      }));
+      setMessages((prev) => [...prev, assistantMsg, ...proposalMessages]);
+      try {
+        setConversations(await aiApi.getConversations());
+      } catch (cause: unknown) {
+        setError(cause instanceof Error
+          ? `Message sent, but saved conversations could not be refreshed: ${cause.message}`
+          : 'Message sent, but saved conversations could not be refreshed.');
+      }
+    } catch (cause: unknown) {
+      setMessages((prev) => prev.filter((message) => message.id !== userMsg.id));
+      setInputPrompt(prompt);
+      setError(cause instanceof Error ? cause.message : 'Unable to send your message.');
     } finally {
+      sendingRef.current = false;
       setLoading(false);
     }
   };
 
-  const handleApproveProposal = async (proposalId: string) => {
-    await aiApi.approveProposal(proposalId);
-    // Update local message proposal state
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.proposal?.id === proposalId
-          ? { ...msg, proposal: { ...msg.proposal, status: 'approved' } }
-          : msg
-      )
-    );
+  const handleApproveProposal = async (proposalId: string): Promise<boolean> => {
+    setError(null);
+    try {
+      await aiApi.approveProposal(proposalId);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.proposal?.id === proposalId
+            ? { ...msg, proposal: { ...msg.proposal, status: 'approved' } }
+            : msg
+        )
+      );
+      return true;
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Unable to approve this proposal.');
+      return false;
+    }
   };
 
   const handleRejectProposal = async (proposalId: string) => {
-    await aiApi.rejectProposal(proposalId);
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.proposal?.id === proposalId
-          ? { ...msg, proposal: { ...msg.proposal, status: 'rejected' } }
-          : msg
-      )
-    );
+    setError(null);
+    try {
+      await aiApi.rejectProposal(proposalId);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.proposal?.id === proposalId
+            ? { ...msg, proposal: { ...msg.proposal, status: 'rejected' } }
+            : msg
+        )
+      );
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Unable to reject this proposal.');
+    }
   };
 
   return (
@@ -94,22 +180,50 @@ export const AIAssistantPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>AI Study Assistant</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-primary-subtle text-primary font-bold">
-              FR-03 Proposal Engine
-            </span>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Submit natural-language requests for task breakdowns. All suggestions require user confirmation.
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label htmlFor="ai-conversation" className="sr-only">Saved conversations</label>
+            <select
+              id="ai-conversation"
+              aria-label="Saved conversations"
+              value={activeConversationId || ''}
+              onChange={(event) => void handleSelectConversation(event.target.value)}
+              disabled={loadingConversation || loading || conversations.length === 0}
+              className="max-w-full rounded-xl border border-subtle bg-white px-3 py-2 text-xs text-deep-purple dark:bg-[#1E163B] dark:text-white"
+            >
+              {conversations.length === 0 && <option value="">No saved conversations</option>}
+              {conversations.map((conversation) => (
+                <option key={conversation.id} value={conversation.id}>
+                  {conversation.title || 'Untitled conversation'}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              pill
+              disabled={loadingConversation || loading}
+              onClick={() => void handleNewConversation()}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New conversation
+            </Button>
+          </div>
         </div>
 
         <div className="hidden sm:flex items-center gap-2 text-xs text-muted-purple">
           <MascotBunny mood="focus" size={42} showSparkles={false} />
-          <span>Bramble AI is online</span>
+          <span>Your study strategist</span>
         </div>
       </div>
+
+      {error && <Card role="alert" className="flex-shrink-0 p-3 text-xs text-rose-600">{error}</Card>}
 
       {/* Suggestion Chips */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-shrink-0 custom-scrollbar">
@@ -117,6 +231,7 @@ export const AIAssistantPage: React.FC = () => {
           <button
             key={idx}
             onClick={() => handleSend(chip)}
+            disabled={loading || loadingConversation}
             className="flex-shrink-0 text-xs px-3.5 py-1.5 rounded-full bg-white dark:bg-[#1E163B] border border-subtle hover:border-primary text-deep-purple dark:text-lavender-200 transition-all shadow-xs flex items-center gap-1.5 active:scale-95"
           >
             <Sparkles className="w-3 h-3 text-primary" />
@@ -127,6 +242,14 @@ export const AIAssistantPage: React.FC = () => {
 
       {/* Chat Messages Feed */}
       <Card className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 custom-scrollbar">
+        {loadingConversation && (
+          <p className="text-sm text-muted-purple">Loading your saved assistant conversation...</p>
+        )}
+        {!loadingConversation && messages.length === 0 && (
+          <p className="text-sm text-muted-purple">
+            Your assistant conversation will appear here. Ask a question or choose a suggestion to get started.
+          </p>
+        )}
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -204,12 +327,12 @@ export const AIAssistantPage: React.FC = () => {
             value={inputPrompt}
             onChange={(e) => setInputPrompt(e.target.value)}
             placeholder="Type your study goal or ask AI to break down a project..."
-            disabled={loading}
+            disabled={loading || loadingConversation}
             className="flex-1 text-xs sm:text-sm px-4 py-2 bg-transparent text-deep-purple dark:text-white focus:outline-none"
           />
           <Button
             type="submit"
-            disabled={loading || !inputPrompt.trim()}
+            disabled={loading || loadingConversation || !inputPrompt.trim()}
             pill
             size="sm"
             className="px-5"

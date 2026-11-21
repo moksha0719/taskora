@@ -165,7 +165,7 @@ export type ProposalType =
   | 'habit_suggestion' 
   | 'brain_dump_conversion';
 
-export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'modified';
+export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'modified';
 
 export interface AIProposalItem {
   id: string;
@@ -228,6 +228,33 @@ export interface FocusSession {
   xpEarned: number;
 }
 
+export interface Flashcard {
+  id: string;
+  deckId: string;
+  front: string;
+  back: string;
+  position: number;
+  repetitions: number;
+  intervalDays: number;
+  easeFactor: number;
+  reviewCount: number;
+  dueAt: string;
+  lastReviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FlashcardDeck {
+  id: string;
+  userId: string;
+  title: string;
+  description: string | null;
+  cardCount: number;
+  createdAt: string;
+  updatedAt: string;
+  cards?: Flashcard[];
+}
+
 export interface StudyNote {
   id: string;
   userId: string;
@@ -236,7 +263,7 @@ export interface StudyNote {
   title: string;
   content: string;
   tags: string[];
-  isPrivate: boolean; // default true (FR-10)
+  isPrivate: boolean; // default true
   shareCode?: string;
   updatedAt: string;
   createdAt: string;
@@ -273,6 +300,7 @@ export interface RoomMessage {
 
 export interface StudyRoom {
   id: string;
+  ownerId?: string;
   name: string;
   topic: string;
   isPrivate: boolean;
@@ -284,6 +312,7 @@ export interface StudyRoom {
   breakDurationMinutes: number;
   currentMode: 'focus' | 'break';
   timerRemainingSeconds: number;
+  timerStartedAt?: string | null;
   createdAt: string;
 }
 
@@ -349,7 +378,6 @@ export interface AdminStats {
   totalStudyHours: number;
   totalTasksCompleted: number;
   reportedContentCount: number;
-  serverUptimePercent: number;
 }
 
 export interface ModerationReport {

@@ -15,6 +15,9 @@ const TASK_SELECT = {
     id: true,
     title: true,
     description: true,
+    category: true,
+    tags: true,
+    subtasks: true,
     status: true,
     priority: true,
     dueDate: true,
@@ -45,6 +48,9 @@ function createPrismaMock(seed = []) {
                 const task = {
                     id: randomUUID(),
                     description: null,
+                    category: "General",
+                    tags: [],
+                    subtasks: [],
                     status: "TODO",
                     priority: "MEDIUM",
                     dueDate: null,
@@ -143,6 +149,9 @@ function seedTask(id, userId, title = "Existing task") {
         userId,
         title,
         description: null,
+        category: "General",
+        tags: [],
+        subtasks: [],
         status: "TODO",
         priority: "MEDIUM",
         dueDate: null,
@@ -160,6 +169,9 @@ test("authenticated user can create a task with validated fields", async () => {
             description: "Check production readiness",
             status: "IN_PROGRESS",
             priority: "HIGH",
+            category: "Computer Science",
+            tags: ["Release"],
+            subtasks: [{ id: "check", title: "Verify migrations", completed: false }],
             dueDate: "2026-12-01T12:30:00Z"
         }));
         const body = await response.json();
@@ -169,14 +181,20 @@ test("authenticated user can create a task with validated fields", async () => {
         assert.equal(body.task.title, "Prepare release");
         assert.equal(body.task.status, "IN_PROGRESS");
         assert.equal(body.task.priority, "HIGH");
+        assert.equal(body.task.category, "Computer Science");
+        assert.deepEqual(body.task.tags, ["Release"]);
+        assert.deepEqual(body.task.subtasks, [{ id: "check", title: "Verify migrations", completed: false }]);
         assert.equal(body.task.dueDate, "2026-12-01T12:30:00.000Z");
         assert.deepEqual(Object.keys(body.task).sort(), [
+            "category",
             "createdAt",
             "description",
             "dueDate",
             "id",
             "priority",
             "status",
+            "subtasks",
+            "tags",
             "title",
             "updatedAt"
         ]);
@@ -259,7 +277,7 @@ test("task completion creates one owner-scoped notification transactionally", as
     assert.equal(notificationCalls[0][0].userId, USER_A);
     assert.equal(notificationCalls[0][0].type, "task_completed");
     assert.equal(notificationCalls[0][0].taskId, TASK_A);
-    assert.equal(notificationCalls[0][0].actionUrl, `/tasks/${TASK_A}`);
+    assert.equal(notificationCalls[0][0].actionUrl, "/tasks");
 });
 
 test("concurrent task completion requests create only one notification", async () => {
@@ -316,6 +334,7 @@ test("task creation and updates reject invalid fields and values", async () => {
             { description: "Title is required" },
             { title: "   " },
             { title: "Task", status: "DONE" },
+            { title: "Task", subtasks: [{ id: "broken", title: "Missing completed value" }] },
             { title: "Task", priority: "URGENT" },
             { title: "Task", description: 12 },
             { title: "Task", dueDate: "not-a-date" },
@@ -328,6 +347,25 @@ test("task creation and updates reject invalid fields and values", async () => {
             const response = await request("/api/tasks", jsonRequest("POST", body));
             assert.equal(response.status, 400);
         }
+
+        const inReviewResponse = await request(
+            "/api/tasks",
+            jsonRequest("POST", {
+                title: "Review release",
+                status: "IN_REVIEW",
+                category: "Engineering",
+                tags: ["release"],
+                subtasks: [{ id: "review", title: "Review changes", completed: false }]
+            })
+        );
+        assert.equal(inReviewResponse.status, 201);
+        const inReviewTask = (await inReviewResponse.json()).task;
+        assert.equal(inReviewTask.status, "IN_REVIEW");
+        assert.equal(inReviewTask.category, "Engineering");
+        assert.deepEqual(inReviewTask.tags, ["release"]);
+        assert.deepEqual(inReviewTask.subtasks, [
+            { id: "review", title: "Review changes", completed: false }
+        ]);
 
         const emptyUpdate = await request(`/api/tasks/${TASK_A}`, jsonRequest("PUT", {}));
         assert.equal(emptyUpdate.status, 400);
@@ -365,6 +403,13 @@ test("task text fields accept configured boundaries and reject overlong or blank
             jsonRequest("PUT", { description: "   " })
         );
         assert.equal(invalidPartialUpdate.status, 400);
+
+        const validInReview = await request("/api/tasks", jsonRequest("POST", {
+            title: "Review",
+            status: "IN_REVIEW"
+        }));
+        assert.equal(validInReview.status, 201);
+        assert.equal((await validInReview.json()).task.status, "IN_REVIEW");
     });
 });
 

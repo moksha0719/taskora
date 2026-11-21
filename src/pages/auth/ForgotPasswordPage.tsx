@@ -1,43 +1,45 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/common/Button';
 import { MascotBunny } from '../../components/common/MascotBunny';
-import { Mail, ArrowRight, CheckCircle2, KeyRound } from 'lucide-react';
+import { Mail, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { authApi } from '../../lib/api/client';
 
 export const ForgotPasswordPage: React.FC = () => {
   const navigate = useNavigate();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const resetToken = useMemo(() => new URLSearchParams(window.location.search).get('token'), []);
+  const [step, setStep] = useState<1 | 2 | 3>(resetToken ? 3 : 1);
   const [email, setEmail] = useState('emily.watson@university.edu');
-  const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSendCode = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+    authApi.forgotPassword(email).then(() => {
       setLoading(false);
       setStep(2);
-    }, 600);
-  };
-
-  const handleVerifyCode = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
+    }).catch((error) => {
       setLoading(false);
-      setStep(3);
-    }, 600);
+      alert(error instanceof Error ? error.message : 'Unable to request password reset.');
+    });
   };
 
   const handleResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+    if (!resetToken) {
       setLoading(false);
-      alert('Password updated successfully! You can now log in.');
+      alert('The password reset link is missing or invalid.');
+      return;
+    }
+    authApi.resetPassword(resetToken, newPassword).then(() => {
+      setLoading(false);
       navigate('/login');
-    }, 600);
+    }).catch((error) => {
+      setLoading(false);
+      alert(error instanceof Error ? error.message : 'Unable to reset password.');
+    });
   };
 
   return (
@@ -47,12 +49,12 @@ export const ForgotPasswordPage: React.FC = () => {
 
         <h3 className="text-2xl font-bold font-heading text-deep-purple dark:text-white mb-2">
           {step === 1 && 'Reset Password'}
-          {step === 2 && 'Enter Reset Code'}
+          {step === 2 && 'Check your email'}
           {step === 3 && 'New Password'}
         </h3>
         <p className="text-xs text-muted-purple mb-6">
-          {step === 1 && "Don't worry! Enter your email and we'll send a 6-digit verification code."}
-          {step === 2 && `We sent a code to ${email}. Check your inbox! (Demo code: 492015)`}
+          {          step === 1 && "Enter your email and, if an account exists, we’ll send secure reset instructions."}
+          {step === 2 && 'If an account exists for this email and email delivery is configured, reset instructions will be sent.'}
           {step === 3 && 'Choose a strong new password for your Taskora account.'}
         </p>
 
@@ -76,36 +78,19 @@ export const ForgotPasswordPage: React.FC = () => {
             </div>
 
             <Button type="submit" disabled={loading} pill className="w-full py-3 text-xs font-bold">
-              <span>{loading ? 'Sending...' : 'Send Verification Code'}</span>
+              <span>{loading ? 'Sending...' : 'Send Reset Instructions'}</span>
               <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           </form>
         )}
 
         {step === 2 && (
-          <form onSubmit={handleVerifyCode} className="space-y-4 text-left">
-            <div>
-              <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1.5">
-                6-Digit Code
-              </label>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 text-muted-purple absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  required
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="w-full text-xs pl-10 pr-4 py-2.5 rounded-2xl border border-subtle bg-white dark:bg-[#181131] text-deep-purple dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary font-mono tracking-widest text-center"
-                  placeholder="492015"
-                />
-              </div>
-            </div>
-
-            <Button type="submit" disabled={loading} pill className="w-full py-3 text-xs font-bold">
-              <span>{loading ? 'Verifying...' : 'Verify Code'}</span>
+          <div className="space-y-4">
+            <Button type="button" onClick={() => navigate('/login')} pill className="w-full py-3 text-xs font-bold">
+              <span>Return to login</span>
               <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
-          </form>
+          </div>
         )}
 
         {step === 3 && (

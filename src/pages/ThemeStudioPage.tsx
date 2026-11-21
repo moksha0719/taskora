@@ -38,9 +38,8 @@ export const ThemeStudioPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
             <span>Lavender Dream Theme Studio</span>
-            <Badge variant="primary">FR-17, 19, 20 Customizable</Badge>
           </h2>
           <p className="text-xs text-muted-purple mt-0.5">
             Personalize your workspace aesthetics. Changes preview live before you save.
@@ -218,10 +217,6 @@ export const ThemeStudioPage: React.FC = () => {
 
           {/* Typography, Card Style & Mascot Selectors */}
           <Card className="p-6 space-y-4">
-            <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white pb-2 border-b border-subtle">
-              Decorative Personalization (FR-19)
-            </h3>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Mascot Selector */}
               <div>
@@ -295,7 +290,7 @@ export const ThemeStudioPage: React.FC = () => {
           <LiveThemePreview config={config} />
 
           <p className="text-[11px] text-muted-purple text-center px-4 leading-relaxed">
-            All colors and radius values synchronize across your sessions and persist in your browser profile (FR-20).
+            All colors and radius values synchronize across your sessions and persist in your browser profile.
           </p>
         </div>
       </div>

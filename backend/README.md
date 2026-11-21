@@ -1,11 +1,13 @@
 # Taskora Backend
 
 The backend is a Node.js 22 and Express API using PostgreSQL through Prisma.
-It provides JWT authentication, task and Study Planner APIs, notifications,
-and server-side Gemini-backed Assistant and Brain Dump endpoints. The
+It provides JWT authentication, task and Study Planner APIs, flashcard decks,
+focus sessions, persisted study-room timers, notifications, and server-side
+Gemini-backed Assistant and Brain Dump endpoints. The
 notification scheduler runs inside each backend process; notifications are
-in-app only. The frontend still uses local mock data and is not connected to
-these APIs.
+in-app only. The frontend is connected to the authentication, task, study
+planner, flashcard, focus, study-room, AI/Brain Dump, notification and product
+persistence APIs. Theme and dashboard preferences remain browser-local.
 
 ## Requirements
 
@@ -33,15 +35,69 @@ frontend variables.
 | `PORT` | Optional; defaults to `5000`. |
 | `GEMINI_API_KEY` | Required to use Gemini-backed endpoints; not required for server startup. |
 | `GEMINI_MODEL` | Required to use Gemini-backed endpoints; not required for server startup. |
+| `EMAIL_PROVIDER` | `mock` for non-sending local development, `resend` for Resend API delivery, or `webhook` for the existing custom delivery endpoint. Defaults to `mock` outside production; required in production. |
+| `EMAIL_API_KEY` | Required when `EMAIL_PROVIDER=resend`. Store the Resend API key as a backend secret. |
+| `EMAIL_FROM` | Required for Resend; sender address verified by the provider. |
+| `EMAIL_FROM_NAME` | Required for Resend; defaults to `Taskora` for webhook payloads. |
+| `PASSWORD_RESET_URL` | Frontend `/forgot-password` URL. Required for Resend; use the deployed HTTPS URL in production. |
+| `EMAIL_DELIVERY_TIMEOUT_MS` | Optional provider request timeout in milliseconds; defaults to `5000`, maximum `60000`. |
+| `PASSWORD_RESET_DELIVERY_URL` | Required when `EMAIL_PROVIDER=webhook`; HTTPS is required in production. If set without `EMAIL_PROVIDER`, it preserves the legacy webhook selection. |
+| `PASSWORD_RESET_DELIVERY_AUTHORIZATION` | Optional custom webhook authorization header value. |
+| `PASSWORD_RESET_DELIVERY_SIGNING_SECRET` | Optional HMAC-SHA256 signing secret for reset-delivery payloads. |
+| `PASSWORD_RESET_DELIVERY_TIMEOUT_MS` | Legacy alias for `EMAIL_DELIVERY_TIMEOUT_MS`; retained for existing webhook deployments. |
 | `CORS_ALLOWED_ORIGINS` | Optional in development; comma-separated exact origins allowed by CORS. In production, configure the deployed frontend origin or browser requests with an `Origin` header are denied. |
 | `POSTGRES_USER` | Required by the development Compose file. |
 | `POSTGRES_PASSWORD` | Required by the development Compose file. |
 | `POSTGRES_DB` | Optional in Compose; defaults to `taskora_db`. |
+| `PROFILE_UPLOAD_DIR` | Optional local profile-photo storage directory; defaults to `backend/uploads/profile-photos`. |
 
 For a native backend process, `DATABASE_URL` must refer to the local PostgreSQL
 instance and a dedicated development database. For Compose, the backend
 connects to the `postgres` service; Compose constructs its `DATABASE_URL` from
 the PostgreSQL variables above.
+
+### External service integrations
+
+| Service | Purpose | Configuration/status |
+| --- | --- | --- |
+| Google Gemini | AI Assistant and Brain Dump processing. | `GEMINI_API_KEY` and `GEMINI_MODEL` are required when those endpoints are used. Requests have a 20-second timeout; missing credentials produce a safe service-unavailable response. |
+| Resend email API | Password-reset email delivery. | Optional for local use; configure `EMAIL_PROVIDER=resend`, `EMAIL_API_KEY`, verified `EMAIL_FROM`, `EMAIL_FROM_NAME`, and `PASSWORD_RESET_URL` to enable real delivery. |
+| Custom email webhook | Backward-compatible password-reset handoff to an existing mail service. | Select `EMAIL_PROVIDER=webhook` and configure `PASSWORD_RESET_DELIVERY_URL`; optional authorization and HMAC signing are supported. |
+| In-app notifications | Task and study reminders displayed in Taskora. | Persisted in PostgreSQL and scheduled by the backend; email/push delivery is not implemented. |
+| File/image storage | Profile photos. | Authenticated JPEG, PNG, and WebP uploads (up to 5 MB) are stored locally and their public URL is saved in `User.avatar`. |
+| Email verification | Account verification. | Not implemented; there are no verification emails or verification-token workflows to configure. |
+| Redis/pub-sub | Cross-replica study-room events and shared rate limits. | Not currently integrated. Study-room SSE and rate-limit counters are process-local; Redis is not required for a single backend instance. |
+
+No email or Gemini credentials are included in the repository. Automated tests
+use mocked transports and never call Resend or Gemini.
+
+### Password-reset email setup
+
+Local development defaults to `EMAIL_PROVIDER=mock`; it does not send an email
+and logs a safe delivery status. To use Resend, configure the provider key in
+the backend process environment (or a local, untracked `backend/.env`):
+
+```dotenv
+EMAIL_PROVIDER=resend
+EMAIL_API_KEY=<Resend API key>
+EMAIL_FROM=no-reply@your-verified-domain.example
+EMAIL_FROM_NAME=Taskora
+PASSWORD_RESET_URL=https://your-frontend.example/forgot-password
+EMAIL_DELIVERY_TIMEOUT_MS=5000
+```
+
+Verify the sender domain and address with the email provider before expecting
+delivery. Production startup rejects missing or invalid provider configuration
+and requires HTTPS for both the reset URL and webhook delivery. Provider
+credentials and reset tokens are never written to logs or API responses.
+
+To keep using a custom mail-delivery webhook, set
+`EMAIL_PROVIDER=webhook` and `PASSWORD_RESET_DELIVERY_URL`. The webhook
+continues to receive the legacy `email`, `token`, and `expiresAt` fields; when
+`PASSWORD_RESET_URL` is configured, it also receives a generated `resetUrl`
+and rendered subject/text/HTML content. Optional authorization and HMAC
+signatures can authenticate that request. A successful HTTP response only
+confirms provider acceptance; it does not prove inbox delivery.
 
 Generate Prisma Client, validate the schema, and apply the checked-in migrations
 to a local development database:
@@ -52,6 +108,13 @@ npm run db:generate
 npm run db:validate
 npm run db:deploy
 ```
+
+The forward-only migrations add the persisted product models, including SM-2
+flashcard review state and shared room-timer start timestamps, preserve task
+category/tags/subtasks and the `IN_REVIEW` state, cascade task deletion with its
+owner, and enforce single-use focus-session completions. `db:deploy` applies
+these changes only to the `DATABASE_URL` supplied to that command; verify the
+target database before applying migrations.
 
 The `predev` lifecycle regenerates Prisma Client from the current schema before
 the development server starts. This keeps persistent Docker dependency volumes
@@ -67,37 +130,79 @@ npm run dev
 The server listens on port `5000` by default. To run it without nodemon, use
 `npm start`.
 
-Run the backend test suite from the repository root or `backend/`:
+## Isolated PostgreSQL integration tests
+
+The integration-test service is a separate Compose project and volume. It uses
+PostgreSQL 16, publishes a dynamically selected free port only on `127.0.0.1`,
+and creates the `taskora_test_core` database. Tests connect as
+`taskora_test_user`, a database-owning role that is not a superuser and cannot
+create roles or databases. A separate generated bootstrap credential is used
+only by the container initialization process; it is not used by Prisma or the
+tests.
+
+Prerequisites: Docker Desktop (or Docker Engine) with the Compose plugin, and
+the backend dependencies installed. From the repository root:
 
 ```bash
-npm --prefix backend test
-# or, from backend/
-npm test
+npm --prefix backend run db:test:up
+npm --prefix backend run db:test:verify
+npm --prefix backend run db:test:validate
+npm --prefix backend run db:test:generate
+npm --prefix backend run db:test:migrate
+npm --prefix backend run db:test:status
+npm --prefix backend run db:test:diff
+npm --prefix backend run test:integration
+npm --prefix backend run test:all
+npm --prefix backend run db:test:down
 ```
 
-The default backend tests use mocked dependencies and do not require a live
-database. The two PostgreSQL integration tests require
-`TASKORA_TEST_DATABASE_URL`; both are skipped when it is not configured. Each
-test accepts only a loopback URL (`127.0.0.1`) whose database name starts with
-`taskora_test_`. Set the variable securely in the test process environment and
-use a fresh, disposable test database, never a development or production
-database. Provision the database and apply the checked-in migrations before
-running either test.
+The same scripts can be run from `backend/` without the `--prefix backend`
+argument. The setup script generates random, test-only credentials in
+`~/.taskora-test/postgres-compose.env` (on Windows, under the current user's
+home directory). That file is outside the repository and is not printed.
+`TASKORA_TEST_DATABASE_URL` is set only in the verification, migration, and
+test child processes. Prisma's `DATABASE_URL` is overridden there to the same
+verified loopback test database; no existing `.env` file is loaded by these
+commands.
 
-```bash
-# From backend/, with TASKORA_TEST_DATABASE_URL configured:
-node --test test/integration/postgresPersistence.test.js
-node --test test/integration/task3Task4Persistence.test.js
+`db:test:migrate` applies the checked-in migrations with `prisma migrate
+deploy`; it never resets or pushes a schema. `db:test:status` confirms migration
+history, and `db:test:diff` uses Prisma's read-only schema diff to check that
+the migrated database matches `schema.prisma`. `test:integration` runs the two
+PostgreSQL tests serially. `test:all` runs the complete backend suite,
+including those integration tests. The regular `npm test` command deliberately
+clears database URL variables, runs tests serially, and cannot use a
+development/production `DATABASE_URL`; database-dependent tests are reported
+as skipped in that unit/API-only mode.
 
-# Or run both integration tests together:
-node --test test/integration/postgresPersistence.test.js test/integration/task3Task4Persistence.test.js
-```
+Both integration tests create uniquely identified records and delete their
+test users in teardown, which cascades their related rows. They do not truncate
+tables or reset the database, and can be rerun against the same dedicated test
+database. `db:test:down` stops/removes only the test Compose container and
+network; it preserves the isolated test volume so a later run can reuse the
+migrations.
+
+**Never point integration tests, migration commands, cleanup scripts, or
+Prisma test configuration at a development or production database.** The
+provided commands verify the exact test database name, host, port, role, role
+permissions, and PostgreSQL major version before migration or test activity.
+Do not manually override `TASKORA_TEST_DATABASE_URL` when using these scripts.
 
 `postgresPersistence.test.js` covers persistence and ownership for users,
 tasks, study plans, schedules, completions, and notifications.
-`task3Task4Persistence.test.js` covers Task 3 and Task 4 persistence, ownership,
-migration structure, and rollback behavior. The tests do not provision or
-migrate the database.
+`task3Task4Persistence.test.js` covers AI conversation/proposal and Brain Dump
+persistence, task category/tags/subtasks and account-deletion behavior,
+migration structure, and transactional rollback cases.
+
+Troubleshooting:
+
+- If Docker is unavailable, start Docker Desktop and retry `db:test:up`.
+- If no port is available in the configured loopback range, stop the unrelated
+  local service occupying that range; the script will not take its port.
+- If PostgreSQL fails its readiness check, inspect only the dedicated test
+  service with `docker compose --project-name taskora-postgres-test --file
+  backend/docker-compose.test.yml logs postgres-test`. Do not inspect or alter
+  the development database to resolve a test-service failure.
 
 ## Docker development
 
@@ -120,6 +225,12 @@ Check backend readiness at `http://localhost:5000/health/ready`. It returns
 `200` when the database accepts a simple query and `503` otherwise. This checks
 database connectivity, not whether every migration has been applied. The
 liveness endpoint is `http://localhost:5000/health/live`.
+
+Profile photos are stored under `backend/uploads/profile-photos` for a native
+backend. Docker Compose stores them in the separate `backend_profile_photos`
+named volume mounted at `/app/uploads/profile-photos`, so rebuilding or
+restarting the backend does not remove uploaded images. This photo volume is
+independent of the PostgreSQL data volume.
 
 Stop and remove the development containers and network while preserving the
 PostgreSQL data volume:
@@ -207,6 +318,39 @@ at `POST /api/study-plans/generate` returns a preview and does not save it.
 Persisting the schedule is a separate
 `PUT /api/study-plans/:id/schedule` operation.
 
+Owner-scoped product APIs are also mounted under `/api`:
+
+- Habits: `GET/POST /api/habits`, `PUT /api/habits/:id/check-ins`, `DELETE /api/habits/:id`
+- Notes: `GET/POST /api/notes`, `PUT/DELETE /api/notes/:id`, public shared-note retrieval at `GET /api/notes/shared/:shareCode`
+- Focus: `GET /api/focus/sessions`, `POST /api/focus/sessions/start`, and `POST /api/focus/sessions` to complete a server-timed session. XP is awarded only once, after the signed session duration elapses; overlapping and replayed completions are rejected.
+- Study rooms: `GET/POST /api/study-rooms`, `POST /api/study-rooms/:id/join`, `POST /api/study-rooms/:id/messages`
+- Gamification: `GET /api/gamification`; XP transactions are created by trusted server workflows, not a client-write endpoint.
+- Analytics: `GET /api/analytics`
+- Search: `GET /api/search?q=...`
+- Account: `PATCH /api/auth/profile`, `PATCH /api/auth/password`, `DELETE /api/auth/account`
+- Admin: `GET /api/admin/stats` (requires `UserRole.ADMIN`)
+
+Password recovery:
+
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
+
+Reset tokens are random, hashed before persistence, expire after 30 minutes,
+and are invalidated after use. Known and unknown accounts receive the same
+generic response. Local development defaults to a non-sending mock provider.
+Configure Resend or the backward-compatible webhook to deliver real reset
+instructions; production requires an explicit provider and HTTPS endpoints.
+Provider errors are logged using diagnostic codes only, and the generic API
+response does not reveal account existence or delivery details.
+
+Study room synchronization:
+
+- `GET /api/study-rooms/:id/events`
+
+The endpoint uses Server-Sent Events and is authorized against room
+membership. Events are in-process only; a Redis/pub-sub adapter is required
+for cross-replicas synchronization.
+
 ### Request validation and protection
 
 JSON request bodies are limited to 1 MiB. Malformed JSON returns `400`,
@@ -276,6 +420,12 @@ that have become overdue while the scheduler was down.
 - **Gemini unavailable:** Verify that `GEMINI_API_KEY` and `GEMINI_MODEL` are
   configured. Missing or invalid Gemini configuration makes AI requests return
   `503`; it does not prevent non-AI server startup.
+- **Password reset email not delivered:** The default mock provider never sends
+  mail. Configure `EMAIL_PROVIDER=resend` with a valid `EMAIL_API_KEY`, a
+  provider-verified `EMAIL_FROM`, and the correct `PASSWORD_RESET_URL`, or
+  configure the custom webhook. Production requires HTTPS and valid provider
+  configuration at startup. A `2xx` response confirms provider acceptance,
+  not inbox delivery.
 - **Schema or migration issue:** `npm run db:validate` validates the Prisma
   schema; `npm run db:deploy` applies pending migrations. Do not use reset or
   schema-push commands against production. Check migration history and backups
