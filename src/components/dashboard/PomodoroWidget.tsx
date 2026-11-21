@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Pause, Play, RotateCcw, Timer } from 'lucide-react';
 import { Card } from '../common/Card';
 import { useFocusTimer } from '../../context/FocusTimerContext';
 import { focusApi } from '../../lib/api/client';
-import type { FocusSession } from '../../types';
 
 function formatTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -17,18 +16,21 @@ export const PomodoroWidget: React.FC = () => {
     focusMinutes, breakMinutes, mode, secondsLeft, isActive, starting,
     start, pause, reset, lastCompletedSession,
   } = useFocusTimer();
-  const [sessions, setSessions] = useState<FocusSession[]>([]);
+  const [todayFocusMinutes, setTodayFocusMinutes] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let active = true;
-    focusApi.getSessions()
-      .then((result) => {
-        if (active) setSessions(result);
+    setLoading(true);
+    setError(null);
+    focusApi.getTodaySummary()
+      .then((summary) => {
+        if (active) setTodayFocusMinutes(summary.totalFocusMinutes);
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load focus sessions.');
+        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load daily focus time.');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -36,21 +38,8 @@ export const PomodoroWidget: React.FC = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [lastCompletedSession, refreshKey]);
 
-  useEffect(() => {
-    if (!lastCompletedSession) return;
-    setSessions((previous) => [
-      lastCompletedSession,
-      ...previous.filter((session) => session.id !== lastCompletedSession.id),
-    ]);
-  }, [lastCompletedSession]);
-
-  const todaySessions = useMemo(
-    () => sessions.filter((session) => new Date(session.completedAt).toDateString() === new Date().toDateString()),
-    [sessions]
-  );
-  const todayMinutes = todaySessions.reduce((total, session) => total + session.durationMinutes, 0);
   const totalSeconds = (mode === 'focus' ? focusMinutes : breakMinutes) * 60;
   const progress = totalSeconds > 0 ? Math.min(1, Math.max(0, (totalSeconds - secondsLeft) / totalSeconds)) : 0;
   const circumference = 314;
@@ -114,11 +103,24 @@ export const PomodoroWidget: React.FC = () => {
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className="text-muted-purple">Today&apos;s focus</span>
           <span className="font-bold text-deep-purple dark:text-white">
-            {loading ? 'Loading...' : `${todayMinutes} min · ${todaySessions.length} sessions`}
+            {loading
+              ? <span role="status">Loading...</span>
+              : error
+                ? <span>Unavailable</span>
+                : `${todayFocusMinutes ?? 0} min`}
           </span>
         </div>
-        {!loading && todaySessions.length === 0 && !error && (
+        {!loading && !error && todayFocusMinutes === 0 && (
           <p className="mt-1 text-[11px] text-muted-purple">No completed focus sessions today.</p>
+        )}
+        {error && (
+          <button
+            type="button"
+            className="mt-1 text-[11px] font-semibold text-primary hover:underline"
+            onClick={() => setRefreshKey((key) => key + 1)}
+          >
+            Retry
+          </button>
         )}
       </div>
     </Card>

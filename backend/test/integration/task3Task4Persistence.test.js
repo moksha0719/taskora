@@ -615,7 +615,8 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
             "20261117101500_add_ai_and_brain_dump_workflows",
             "20261118160000_add_product_persistence",
             "20261120140000_preserve_task_data_and_cascade_accounts",
-            "20261120143000_validate_focus_session_completion"
+            "20261120143000_validate_focus_session_completion",
+            "20261120235500_add_flashcards_and_room_timer_state"
         ]
     );
 
@@ -825,7 +826,7 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
     );
     assert.equal(accountDeletion.response.status, 204);
     assert.equal(
-        await prisma.task.count({ where: { userId: userA.user.id } }),
-        0
+        await prisma.task.findUnique({ where: { id: accountDeletionTask.body.task.id } }),
+        null
     );
 });

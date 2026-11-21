@@ -41,6 +41,9 @@ function sendBrainDumpServiceError(error, res) {
         if (error.code === "timeout") {
             return res.status(504).json({ error: "AI response timed out" });
         }
+        if (error.code === "rate_limit") {
+            return res.status(429).json({ error: "AI service rate limit reached. Please try again later." });
+        }
         if (error.code === "provider") {
             return res.status(502).json({ error: "AI service is temporarily unavailable" });
         }

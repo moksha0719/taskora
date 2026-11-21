@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { MascotBunny } from '../components/common/MascotBunny';
-import { roomsApi } from '../lib/api/client';
+import { ApiError, roomsApi } from '../lib/api/client';
 import { StudyRoom } from '../types';
 import { Users, Lock, Unlock, Play, Pause, RotateCcw, MessageSquare, Send, Plus, ArrowLeft, Volume2, Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -41,11 +41,9 @@ export const StudyRoomsPage: React.FC = () => {
     try {
       const data = await roomsApi.getRooms();
       setRooms(data);
-      if (activeRoom) {
-        const refreshed = data.find((r) => r.id === activeRoom.id);
-        if (refreshed) setActiveRoom(refreshed);
-        else setActiveRoom(null);
-      }
+      setActiveRoom((currentRoom) => currentRoom
+        ? data.find((room) => room.id === currentRoom.id) || null
+        : null);
       return data;
     } catch (cause) {
       setRoomsError(cause instanceof Error ? cause.message : 'Unable to load study rooms.');
@@ -85,9 +83,19 @@ export const StudyRoomsPage: React.FC = () => {
     try {
       await roomsApi.joinRoom(room.id);
       const updatedRooms = await fetchRooms(false);
-      setActiveRoom(updatedRooms?.find((item) => item.id === room.id) || room);
+      const joinedRoom = updatedRooms?.find((item) => item.id === room.id);
+      if (!joinedRoom) {
+        setRoomActionError('You joined the room, but its participant list could not be refreshed. Please retry.');
+        return;
+      }
+      setActiveRoom(joinedRoom);
     } catch (cause) {
-      setRoomActionError(cause instanceof Error ? cause.message : 'Unable to join this room.');
+      if (cause instanceof ApiError && cause.status === 409) {
+        await fetchRooms(false);
+        setRoomActionError('This study room is full. Please choose another room.');
+      } else {
+        setRoomActionError(cause instanceof Error ? cause.message : 'Unable to join this room.');
+      }
     } finally {
       setRoomActionBusy(false);
     }
@@ -101,11 +109,21 @@ export const StudyRoomsPage: React.FC = () => {
       try {
         await roomsApi.joinRoom(selectedPrivateRoom.id, passcodeAttempt);
         const updatedRooms = await fetchRooms(false);
-        setActiveRoom(updatedRooms?.find((room) => room.id === selectedPrivateRoom.id) || selectedPrivateRoom);
+        const joinedRoom = updatedRooms?.find((room) => room.id === selectedPrivateRoom.id);
+        if (!joinedRoom) {
+          setRoomActionError('You joined the room, but its participant list could not be refreshed. Please retry.');
+          return;
+        }
+        setActiveRoom(joinedRoom);
         setSelectedPrivateRoom(null);
         setPasscodeAttempt('');
       } catch (cause) {
-        setRoomActionError(cause instanceof Error ? cause.message : 'Unable to join this room.');
+        if (cause instanceof ApiError && cause.status === 409) {
+          await fetchRooms(false);
+          setRoomActionError('This study room is full. Please choose another room.');
+        } else {
+          setRoomActionError(cause instanceof Error ? cause.message : 'Unable to join this room.');
+        }
       } finally {
         setRoomActionBusy(false);
       }
@@ -162,7 +180,13 @@ export const StudyRoomsPage: React.FC = () => {
     setRoomActionError(null);
     try {
       if (isOwner) await roomsApi.deleteRoom(activeRoom.id);
-      else await roomsApi.leaveRoom(activeRoom.id);
+      else {
+        await roomsApi.leaveRoom(activeRoom.id);
+        const roomId = activeRoom.id;
+        setRooms((currentRooms) => currentRooms.map((room) => room.id === roomId
+          ? { ...room, participants: room.participants.filter((participant) => participant.id !== user?.id) }
+          : room));
+      }
       setActiveRoom(null);
       await fetchRooms(false);
     } catch (cause) {
@@ -545,6 +569,7 @@ export const StudyRoomsPage: React.FC = () => {
         description="This room is protected by a passcode. Enter the room key to join (TC10)."
       >
         <form onSubmit={handleVerifyPasscode} className="space-y-4 pt-2">
+          {roomActionError && <p role="alert" className="text-sm text-rose-600">{roomActionError}</p>}
           <div>
             <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1">
               Room Passcode

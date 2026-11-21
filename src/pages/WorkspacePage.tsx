@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
-import { notesApi } from '../lib/api/client';
-import { StudyNote } from '../types';
+import { notesApi, studyPlansApi } from '../lib/api/client';
+import type { StudyNote, StudyPlanSubject } from '../types';
 import {
   FolderKanban,
   FileText,
@@ -25,6 +25,9 @@ import { cn } from '../lib/utils';
 export const WorkspacePage: React.FC = () => {
   const [notes, setNotes] = useState<StudyNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [plannerSubjects, setPlannerSubjects] = useState<Pick<StudyPlanSubject, 'id' | 'name'>[]>([]);
+  const [subjectsLoading, setSubjectsLoading] = useState(true);
+  const [subjectsError, setSubjectsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState('');
@@ -52,8 +55,32 @@ export const WorkspacePage: React.FC = () => {
     }
   };
 
+  const fetchPlannerSubjects = async () => {
+    setSubjectsLoading(true);
+    setSubjectsError(null);
+    try {
+      const plans = await studyPlansApi.getPlans();
+      const uniqueSubjects = new Map<string, Pick<StudyPlanSubject, 'id' | 'name'>>();
+      plans.forEach((plan) => {
+        plan.subjects.forEach((subject) => {
+          const key = subject.name.trim().toLocaleLowerCase();
+          if (key && !uniqueSubjects.has(key)) {
+            uniqueSubjects.set(key, { id: subject.id, name: subject.name.trim() });
+          }
+        });
+      });
+      setPlannerSubjects(Array.from(uniqueSubjects.values()));
+    } catch (cause) {
+      setPlannerSubjects([]);
+      setSubjectsError(cause instanceof Error ? cause.message : 'Unable to load Study Planner subjects.');
+    } finally {
+      setSubjectsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchNotes();
+    void fetchNotes();
+    void fetchPlannerSubjects();
   }, []);
 
   const selectNote = (note: StudyNote) => {
@@ -87,11 +114,16 @@ export const WorkspacePage: React.FC = () => {
 
   const handleCreateNewNote = async () => {
     setError(null);
+    const selectedPlannerSubject = plannerSubjects.find((subject) => subject.name === activeSubject)
+      || (activeSubject === 'all' ? plannerSubjects[0] : undefined);
+    const subjectName = selectedPlannerSubject?.name
+      || (activeSubject === 'all' ? 'General' : activeSubject);
+    const existingSubject = notes.find((note) => note.subjectName === subjectName);
     try {
       const newNote = await notesApi.saveNote({
         title: 'Untitled Study Note',
-        subjectId: activeSubject === 'all' ? 'sub_cs301' : activeSubject,
-        subjectName: activeSubject === 'all' ? 'Distributed Systems' : activeSubject,
+        subjectId: selectedPlannerSubject?.id || existingSubject?.subjectId || 'sub_general',
+        subjectName,
         content: 'Start writing your lecture summary or revision notes here...',
         tags: ['Revision'],
         isPrivate: true,
@@ -130,11 +162,22 @@ export const WorkspacePage: React.FC = () => {
     }
   };
 
+  const subjectOptions = new Map<string, { id: string; name: string }>();
+  plannerSubjects.forEach((subject) => {
+    subjectOptions.set(subject.name.toLocaleLowerCase(), subject);
+  });
+  notes.forEach((note) => {
+    const key = note.subjectName.trim().toLocaleLowerCase();
+    if (key && !subjectOptions.has(key)) {
+      subjectOptions.set(key, { id: note.subjectId, name: note.subjectName.trim() });
+    }
+  });
   const subjects = [
     { id: 'all', name: 'All Subjects' },
-    { id: 'Distributed Systems', name: 'Distributed Systems' },
-    { id: 'Interaction Design', name: 'Interaction Design' },
-    { id: 'Discrete Mathematics', name: 'Discrete Mathematics' },
+    ...Array.from(subjectOptions.values()).map((subject) => ({
+      id: subject.name,
+      name: subject.name,
+    })),
   ];
 
   const filteredNotes = notes.filter(
@@ -155,12 +198,23 @@ export const WorkspacePage: React.FC = () => {
         </div>
 
         {error && <Card role="alert" className="text-sm text-rose-600">{error}</Card>}
+        {subjectsError && (
+          <Card role="alert" className="text-sm text-rose-600">
+            {subjectsError} New notes will use General unless a subject is selected.
+          </Card>
+        )}
         {loading && <Card className="text-sm text-muted-purple">Loading notes...</Card>}
         {!loading && !error && notes.length === 0 && (
           <Card className="text-sm text-muted-purple">No notes yet. Create a note to start your workspace.</Card>
         )}
 
-        <Button variant="primary" size="sm" pill onClick={handleCreateNewNote}>
+        <Button
+          variant="primary"
+          size="sm"
+          pill
+          onClick={handleCreateNewNote}
+          disabled={subjectsLoading}
+        >
           <Plus className="w-4 h-4" />
           <span>New Note</span>
         </Button>
@@ -175,6 +229,7 @@ export const WorkspacePage: React.FC = () => {
               Course Subjects
             </h4>
             <div className="space-y-1">
+              {subjectsLoading && <p className="px-2 text-[11px] text-muted-purple">Loading subjects...</p>}
               {subjects.map((sub) => (
                 <button
                   key={sub.id}

@@ -5,14 +5,15 @@ const { GeminiServiceError } = require("../services/geminiService");
 const { AiConversationServiceError } = require("../services/aiConversationService");
 
 const MAX_ASSISTANT_MESSAGE_LENGTH = 4000;
+const CONVERSATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function validateAssistantInput(body) {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
         return { error: "A JSON object is required" };
     }
 
-    if (Object.keys(body).some((field) => field !== "message")) {
-        return { error: "Only the message field is accepted" };
+    if (Object.keys(body).some((field) => !["message", "conversationId"].includes(field))) {
+        return { error: "Only the message and optional conversationId fields are accepted" };
     }
 
     if (typeof body.message !== "string" || !body.message.trim()) {
@@ -22,8 +23,14 @@ function validateAssistantInput(body) {
     if (body.message.length > MAX_ASSISTANT_MESSAGE_LENGTH) {
         return { error: `Message must be ${MAX_ASSISTANT_MESSAGE_LENGTH} characters or fewer` };
     }
+    if (
+        body.conversationId !== undefined &&
+        (typeof body.conversationId !== "string" || !CONVERSATION_ID_PATTERN.test(body.conversationId))
+    ) {
+        return { error: "Conversation ID must be a valid UUID" };
+    }
 
-    return { message: body.message.trim() };
+    return { message: body.message.trim(), conversationId: body.conversationId };
 }
 
 function sendAiServiceError(error, res) {
@@ -36,6 +43,9 @@ function sendAiServiceError(error, res) {
         }
         if (error.code === "timeout") {
             return res.status(504).json({ error: "AI response timed out" });
+        }
+        if (error.code === "rate_limit") {
+            return res.status(429).json({ error: "AI service rate limit reached. Please try again later." });
         }
         if (error.code === "provider") {
             return res.status(502).json({ error: "AI service is temporarily unavailable" });
@@ -72,6 +82,14 @@ function createAiRouter(geminiService, conversationService) {
         }
 
         try {
+            if (validation.conversationId) {
+                const result = await conversationService.sendMessage(
+                    req.user.id,
+                    validation.conversationId,
+                    { message: validation.message }
+                );
+                return res.status(201).json(result);
+            }
             const response = await geminiService.generateContent(validation.message);
             return res.json({ response });
         } catch (error) {

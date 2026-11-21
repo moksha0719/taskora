@@ -3,8 +3,10 @@ const bcrypt = require("bcryptjs");
 const crypto = require("node:crypto");
 const authenticateToken = require("../middleware/authenticateToken");
 const { longestHabitStreak, getAchievementProgress } = require("../services/achievementService");
+const { getLocalDayRange } = require("../lib/localDayRange");
 const roomStreams = new Map();
 const FOCUS_SESSION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOCUS_SESSION_SELECT = {
     id: true,
     userId: true,
@@ -14,6 +16,16 @@ const FOCUS_SESSION_SELECT = {
     xpEarned: true,
     completedAt: true
 };
+
+function isValidUuid(value) {
+    return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+function requireResourceId(req, res, label) {
+    if (isValidUuid(req.params.id)) return true;
+    res.status(400).json({ error: `Invalid ${label} ID` });
+    return false;
+}
 
 function broadcastRoom(roomId, event) {
     const streams = roomStreams.get(roomId);
@@ -28,6 +40,26 @@ function getRoomRemainingSeconds(room, at = new Date()) {
     if (!room.timerStartedAt) return room.timerRemainingSeconds;
     const elapsed = Math.floor((at.getTime() - room.timerStartedAt.getTime()) / 1000);
     return Math.max(0, room.timerRemainingSeconds - Math.max(0, elapsed));
+}
+
+function serializeStudyRoom(room) {
+    const { passcodeHash, participants = [], ...safeRoom } = room;
+    return {
+        ...safeRoom,
+        participants: participants.map((participant) => ({
+            id: participant.id,
+            userId: participant.userId,
+            status: participant.status,
+            joinedAt: participant.joinedAt,
+            user: participant.user
+                ? {
+                    id: participant.user.id,
+                    name: participant.user.name,
+                    avatar: participant.user.avatar
+                }
+                : null
+        }))
+    };
 }
 
 function parseCivilDate(value) {
@@ -193,7 +225,11 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.put("/habits/:id/check-ins", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Habit")) return;
         try {
+            if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+                return res.status(400).json({ error: "A valid date and checked state are required" });
+            }
             const date = parseCivilDate(req.body.date);
             if (!date || typeof req.body.checked !== "boolean" ||
                 Object.keys(req.body).some((field) => !["date", "checked"].includes(field))) {
@@ -217,6 +253,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.delete("/habits/:id", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Habit")) return;
         try {
             const deleted = await prisma.habit.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
             if (deleted.count === 0) return res.status(404).json({ error: "Habit not found" });
@@ -284,6 +321,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.put("/notes/:id", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Note")) return;
         try {
             const allowed = new Set([
                 "title", "content", "subjectId", "subjectName", "tags", "isPrivate"
@@ -338,6 +376,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.delete("/notes/:id", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Note")) return;
         try {
             const deleted = await prisma.studyNote.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
             if (deleted.count === 0) return res.status(404).json({ error: "Note not found" });
@@ -355,6 +394,44 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
             });
             res.json({ sessions });
         } catch (error) { next(error); }
+    });
+
+    router.get("/focus-sessions/today", async (req, res, next) => {
+        try {
+            const unsupportedQuery = Object.keys(req.query).find((field) => field !== "timeZone");
+            if (unsupportedQuery) {
+                return res.status(400).json({ error: `Unsupported query parameter: ${unsupportedQuery}` });
+            }
+            const requestedTimeZone = req.user.timeZone || req.query.timeZone || "UTC";
+            if (typeof requestedTimeZone !== "string" || !requestedTimeZone.trim()) {
+                return res.status(400).json({ error: "A valid time zone is required" });
+            }
+
+            let range;
+            try {
+                range = getLocalDayRange(now(), requestedTimeZone.trim());
+            } catch (error) {
+                if (error instanceof RangeError) {
+                    return res.status(400).json({ error: "A valid time zone is required" });
+                }
+                throw error;
+            }
+
+            const aggregate = await prisma.focusSession.aggregate({
+                where: {
+                    userId: req.user.id,
+                    completedAt: { gte: range.start, lt: range.end }
+                },
+                _sum: { durationMinutes: true }
+            });
+            return res.json({
+                date: range.date,
+                timeZone: requestedTimeZone.trim(),
+                totalFocusMinutes: aggregate._sum.durationMinutes || 0
+            });
+        } catch (error) {
+            return next(error);
+        }
     });
 
     router.post("/focus/sessions/start", async (req, res) => {
@@ -384,7 +461,8 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
         return res.status(201).json({ sessionToken });
     });
 
-    router.post("/focus/sessions", async (req, res, next) => {
+    const completeFocusSession = async (req, res, next) => {
+        let payload;
         try {
             if (
                 !req.body ||
@@ -396,7 +474,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
                 return res.status(400).json({ error: "A valid focus session token is required" });
             }
             const completedAt = now();
-            const payload = decodeFocusToken(
+            payload = decodeFocusToken(
                 req.body.sessionToken,
                 process.env.JWT_SECRET,
                 req.user.id,
@@ -420,7 +498,11 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
                     where: { completionKey: payload.nonce },
                     select: FOCUS_SESSION_SELECT
                 });
-                if (duplicate) return { session: duplicate, duplicate: true };
+                if (duplicate) {
+                    return duplicate.userId === req.user.id
+                        ? { session: duplicate, duplicate: true }
+                        : { conflict: true };
+                }
                 const latest = await tx.focusSession.findFirst({
                     where: { userId: req.user.id },
                     orderBy: { completedAt: "desc" },
@@ -457,6 +539,19 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
             }
             return res.status(result.duplicate ? 200 : 201).json({ session: result.session });
         } catch (error) {
+            if (payload && error && ["P2002", "P2034"].includes(error.code)) {
+                try {
+                    const existing = await prisma.focusSession.findUnique({
+                        where: { completionKey: payload.nonce },
+                        select: FOCUS_SESSION_SELECT
+                    });
+                    if (existing && existing.userId === req.user.id) {
+                        return res.status(200).json({ session: existing });
+                    }
+                } catch (lookupError) {
+                    return next(lookupError);
+                }
+            }
             if (error && error.code === "P2002") {
                 return res.status(409).json({ error: "Focus session has already been completed" });
             }
@@ -465,7 +560,9 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
             }
             return next(error);
         }
-    });
+    };
+    router.post("/focus/sessions", completeFocusSession);
+    router.post("/focus-sessions", completeFocusSession);
 
     router.get("/study-rooms", async (req, res, next) => {
         try {
@@ -481,9 +578,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
                 },
                 orderBy: { createdAt: "desc" }
             });
-            res.json({
-                rooms: rooms.map(({ passcodeHash, ...room }) => room)
-            });
+            res.json({ rooms: rooms.map(serializeStudyRoom) });
         } catch (error) { next(error); }
     });
 
@@ -546,12 +641,12 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
                     messages: { include: { user: { select: { id: true, name: true, avatar: true } } } }
                 }
             });
-            const { passcodeHash, ...safeRoom } = room;
-            res.status(201).json({ room: safeRoom });
+            res.status(201).json({ room: serializeStudyRoom(room) });
         } catch (error) { next(error); }
     });
 
     router.post("/study-rooms/:id/join", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         try {
             if (
                 !req.body ||
@@ -560,6 +655,10 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
                 Object.keys(req.body).some((field) => field !== "passcode")
             ) {
                 return res.status(400).json({ error: "Join request fields are invalid" });
+            }
+            if (Object.hasOwn(req.body, "passcode") &&
+                (typeof req.body.passcode !== "string" || req.body.passcode.length > 64)) {
+                return res.status(400).json({ error: "Room passcode must be at most 64 characters" });
             }
             const joined = await prisma.$transaction(async (tx) => {
                 const room = await tx.studyRoom.findUnique({ where: { id: req.params.id } });
@@ -591,10 +690,16 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
             if (joined.error) return res.status(joined.status).json({ error: joined.error });
             broadcastRoom(req.params.id, { type: "room_presence" });
             res.json({ joined: true });
-        } catch (error) { next(error); }
+        } catch (error) {
+            if (error && error.code === "P2034") {
+                return res.status(409).json({ error: "Study room capacity changed; please retry joining" });
+            }
+            return next(error);
+        }
     });
 
     router.patch("/study-rooms/:id", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         const allowed = new Set([
             "name", "topic", "maxParticipants", "focusDurationMinutes", "breakDurationMinutes"
         ]);
@@ -653,6 +758,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.delete("/study-rooms/:id", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         try {
             const deleted = await prisma.studyRoom.deleteMany({
                 where: { id: req.params.id, ownerId: req.user.id }
@@ -666,6 +772,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.delete("/study-rooms/:id/participants/me", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         try {
             const room = await prisma.studyRoom.findUnique({ where: { id: req.params.id } });
             if (!room) return res.status(404).json({ error: "Study room not found" });
@@ -684,6 +791,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.patch("/study-rooms/:id/timer", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         const actions = new Set(["start", "pause", "reset", "next"]);
         if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) ||
             Object.keys(req.body).length !== 1 || !actions.has(req.body.action)) {
@@ -737,6 +845,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.post("/study-rooms/:id/messages", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         try {
             if (
                 !req.body ||
@@ -763,6 +872,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.get("/study-rooms/:id/events", async (req, res, next) => {
+        if (!requireResourceId(req, res, "Study room")) return;
         try {
             const room = await prisma.studyRoom.findUnique({ where: { id: req.params.id } });
             if (!room) return res.status(404).json({ error: "Study room not found" });
@@ -859,6 +969,13 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
 
     router.get("/analytics", async (req, res, next) => {
         try {
+            const unsupportedQuery = Object.keys(req.query).find((field) => field !== "period");
+            if (unsupportedQuery) {
+                return res.status(400).json({ error: `Unsupported query parameter: ${unsupportedQuery}` });
+            }
+            if (Object.hasOwn(req.query, "period") && typeof req.query.period !== "string") {
+                return res.status(400).json({ error: "Invalid analytics period" });
+            }
             const period = typeof req.query.period === "string" ? req.query.period : "7d";
             if (!["7d", "30d", "semester"].includes(period)) {
                 return res.status(400).json({ error: "Invalid analytics period" });
@@ -943,14 +1060,18 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
 
     router.post("/reports", async (req, res, next) => {
         try {
+            const allowed = new Set(["targetType", "targetId", "reason", "contentSnippet"]);
+            if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) ||
+                Object.keys(req.body).some((field) => !allowed.has(field))) {
+                return res.status(400).json({ error: "Valid report fields are required" });
+            }
             const targetType = typeof req.body.targetType === "string" ? req.body.targetType.toUpperCase() : "";
             const reason = typeof req.body.reason === "string" ? req.body.reason.trim() : "";
             const contentSnippet = typeof req.body.contentSnippet === "string" ? req.body.contentSnippet.trim() : "";
             if (!["NOTE", "ROOM_MESSAGE", "USER"].includes(targetType) ||
                 !reason || reason.length > 500 ||
                 !contentSnippet || contentSnippet.length > 2000 ||
-                typeof req.body.targetId !== "string" ||
-                !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.body.targetId)) {
+                !isValidUuid(req.body.targetId)) {
                 return res.status(400).json({ error: "Valid report fields are required" });
             }
             const targetExists =
@@ -1009,11 +1130,15 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     router.patch("/admin/reports/:id", async (req, res, next) => {
         try {
             if (!(await requireAdmin(req, res))) return;
-            if (!["RESOLVED", "DISMISSED"].includes(req.body.status)) {
+            if (!isValidUuid(req.params.id)) {
+                return res.status(400).json({ error: "Invalid moderation report ID" });
+            }
+            if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) ||
+                Object.keys(req.body).length !== 1 || Object.keys(req.body)[0] !== "status") {
                 return res.status(400).json({ error: "Status must be RESOLVED or DISMISSED" });
             }
-            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id)) {
-                return res.status(400).json({ error: "Invalid moderation report ID" });
+            if (!["RESOLVED", "DISMISSED"].includes(req.body.status)) {
+                return res.status(400).json({ error: "Status must be RESOLVED or DISMISSED" });
             }
             const existing = await prisma.moderationReport.findUnique({ where: { id: req.params.id } });
             if (!existing) return res.status(404).json({ error: "Moderation report not found" });
@@ -1067,6 +1192,13 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
 
     router.get("/search", async (req, res, next) => {
         try {
+            const unsupportedQuery = Object.keys(req.query).find((field) => field !== "q");
+            if (unsupportedQuery) {
+                return res.status(400).json({ error: `Unsupported query parameter: ${unsupportedQuery}` });
+            }
+            if (Object.hasOwn(req.query, "q") && typeof req.query.q !== "string") {
+                return res.status(400).json({ error: "Search query is invalid" });
+            }
             const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
             if (query.length > 200) return res.status(400).json({ error: "Search query is too long" });
             if (!query) return res.json({ tasks: [], notes: [], habits: [] });

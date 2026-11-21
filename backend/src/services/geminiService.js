@@ -11,6 +11,29 @@ class GeminiServiceError extends Error {
     }
 }
 
+function getErrorStatus(error) {
+    const status = error && (error.status || error.statusCode);
+    return Number(status);
+}
+
+function isRateLimitError(error) {
+    if (!error) return false;
+    const code = error.code === undefined ? "" : String(error.code).toUpperCase();
+    const name = typeof error.name === "string" ? error.name.toUpperCase() : "";
+    return getErrorStatus(error) === 429 ||
+        ["429", "RESOURCE_EXHAUSTED", "RATE_LIMIT_EXCEEDED", "TOO_MANY_REQUESTS"].includes(code) ||
+        ["RESOURCEEXHAUSTED", "TOOMANYREQUESTS"].includes(name);
+}
+
+function isTimeoutError(error) {
+    if (!error) return false;
+    const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
+    const name = typeof error.name === "string" ? error.name : "";
+    return getErrorStatus(error) === 504 ||
+        ["APIConnectionTimeoutError", "RequestTimeoutError", "TimeoutError", "AbortError"].includes(name) ||
+        ["ETIMEDOUT", "ECONNABORTED", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT"].includes(code);
+}
+
 function createGeminiService({
     clientFactory = (apiKey) => new GoogleGenAI({
         apiKey,
@@ -43,13 +66,10 @@ function createGeminiService({
 
             return response.text;
         } catch (error) {
-            const timedOut = error && [
-                "APIConnectionTimeoutError",
-                "RequestTimeoutError",
-                "TimeoutError"
-            ].includes(error.name);
-
-            if (timedOut) {
+            if (isRateLimitError(error)) {
+                throw new GeminiServiceError("Gemini request was rate limited", "rate_limit");
+            }
+            if (isTimeoutError(error)) {
                 throw new GeminiServiceError("Gemini request timed out", "timeout");
             }
 

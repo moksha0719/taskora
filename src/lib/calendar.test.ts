@@ -11,6 +11,7 @@ function planInTimeZone(timeZone: string): ApiStudyPlan {
     status: 'DRAFT',
     startDate: '2026-11-17',
     endDate: '2026-12-17',
+    nextSessionDate: '2026-11-24',
     timeZone,
     weeklyTargetMinutes: 600,
     studyDaysPerWeek: 4,
@@ -52,6 +53,32 @@ describe('calendar study time zones', () => {
       timeZone: 'Asia/Colombo',
     });
     expect(getStudyTimeZoneSummary([plan])).toBe('Asia/Colombo');
+  });
+
+  it('marks only completed schedule occurrences on the calendar', () => {
+    const plan = planInTimeZone('Asia/Colombo');
+    const start = new Date(2026, 10, 17);
+    const events = getCalendarEvents([], [plan], start, addCalendarDays(start, 8), [{
+      id: 'completion-1',
+      scheduleItemId: '550e8400-e29b-41d4-a716-446655440003',
+      occurrenceDate: '2026-11-17',
+      completed: true,
+      completedAt: '2026-11-17T12:00:00.000Z',
+      actualDurationMinutes: 45,
+    }]);
+
+    expect(events).toHaveLength(2);
+    expect(events.find((event) => event.date === '2026-11-17')?.completed).toBe(true);
+    expect(events.find((event) => event.date === '2026-11-24')?.completed).toBe(false);
+  });
+
+  it('marks the saved backend nextSessionDate on the calendar', () => {
+    const plan = planInTimeZone('Asia/Colombo');
+    const start = new Date(2026, 10, 17);
+    const events = getCalendarEvents([], [plan], start, addCalendarDays(start, 8));
+
+    expect(events.filter((event) => event.isNextSession).map((event) => event.date))
+      .toEqual(['2026-11-24']);
   });
 
   it('identifies when plans use different configured time zones', () => {

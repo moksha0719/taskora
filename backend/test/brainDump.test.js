@@ -218,6 +218,11 @@ test("Brain Dump endpoint handles provider failures and timeouts safely", async 
             code: "configuration",
             status: 503,
             body: { error: "AI service is not configured" }
+        },
+        {
+            code: "rate_limit",
+            status: 429,
+            body: { error: "AI service rate limit reached. Please try again later." }
         }
     ];
 

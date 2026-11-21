@@ -4,7 +4,11 @@ const test = require("node:test");
 const jwt = require("jsonwebtoken");
 const createApp = require("../src/app");
 const { JWT_AUDIENCE, JWT_ISSUER } = require("../src/config/auth");
-const { StudyPlanServiceError } = require("../src/services/studyPlanService");
+const {
+    createStudyPlanService,
+    StudyPlanServiceError
+} = require("../src/services/studyPlanService");
+const { getNextSessionDate } = require("../src/controllers/studyPlanController");
 const {
     createScheduleCompletionService,
     ScheduleCompletionServiceError
@@ -113,6 +117,63 @@ function planError(message, code, status) {
     return new StudyPlanServiceError(message, code, status);
 }
 
+function createOwnerScopedPrismaMock() {
+    const plans = [];
+    const matchesWhere = (plan, where) =>
+        Object.entries(where).every(([key, value]) => plan[key] === value);
+    const findFirst = async ({ where }) => plans.find((plan) => matchesWhere(plan, where)) || null;
+    const transaction = {
+        studyPlan: {
+            findFirst,
+            updateMany: async ({ where, data }) => {
+                const plan = plans.find((record) => matchesWhere(record, where));
+                if (!plan) return { count: 0 };
+                Object.assign(plan, data, { updatedAt: new Date() });
+                return { count: 1 };
+            },
+            deleteMany: async ({ where }) => {
+                const index = plans.findIndex((plan) => matchesWhere(plan, where));
+                if (index < 0) return { count: 0 };
+                plans.splice(index, 1);
+                return { count: 1 };
+            }
+        },
+        studySubject: {
+            deleteMany: async () => ({ count: 0 }),
+            createMany: async () => ({ count: 0 })
+        },
+        sessionCompletion: {
+            findFirst: async () => null,
+            count: async () => 0
+        }
+    };
+
+    return {
+        plans,
+        studyPlan: {
+            create: async ({ data }) => {
+                const plan = {
+                    ...data,
+                    id: PLAN_ID,
+                    createdAt: new Date("2026-11-16T12:00:00.000Z"),
+                    updatedAt: new Date("2026-11-16T12:00:00.000Z"),
+                    subjects: data.subjects.create.map((subject, index) => ({
+                        ...subject,
+                        id: `subject-${index}`,
+                        planId: PLAN_ID,
+                        scheduleItems: []
+                    }))
+                };
+                plans.push(plan);
+                return plan;
+            },
+            findFirst,
+            findMany: async ({ where }) => plans.filter((plan) => matchesWhere(plan, where))
+        },
+        $transaction: async (callback) => callback(transaction)
+    };
+}
+
 test("POST creates a plan for the authenticated caller and returns 201", async () => {
     let received;
     const service = createMockService({
@@ -122,7 +183,8 @@ test("POST creates a plan for the authenticated caller and returns 201", async (
                 id: PLAN_ID,
                 status: "DRAFT",
                 startDate: new Date("2026-11-16T00:00:00.000Z"),
-                endDate: new Date("2026-12-20T00:00:00.000Z")
+                endDate: new Date("2026-12-20T00:00:00.000Z"),
+                subjects: []
             };
         }
     });
@@ -144,11 +206,73 @@ test("POST creates a plan for the authenticated caller and returns 201", async (
                 id: PLAN_ID,
                 status: "DRAFT",
                 startDate: "2026-11-16",
-                endDate: "2026-12-20"
+                endDate: "2026-12-20",
+                subjects: [],
+                nextSessionDate: null
             }
         });
         assert.deepEqual(received, [USER_A, VALID_INPUT]);
     });
+});
+
+test("a plan created by user A is hidden from user B on GET, PATCH, and DELETE", async () => {
+    const prismaClient = createOwnerScopedPrismaMock();
+    const service = createStudyPlanService({ prismaClient });
+
+    await withServer(service, async (request) => {
+        const created = await request("/api/study-plans", jsonRequest("POST", VALID_INPUT, USER_A));
+        assert.equal(created.status, 201);
+        const { studyPlan } = await created.json();
+        assert.equal(studyPlan.userId, USER_A);
+
+        const forbiddenRead = await request(`/api/study-plans/${PLAN_ID}`, authRequest(USER_B));
+        assert.equal(forbiddenRead.status, 404);
+
+        const forbiddenUpdate = await request(
+            `/api/study-plans/${PLAN_ID}`,
+            jsonRequest("PATCH", VALID_INPUT, USER_B)
+        );
+        assert.equal(forbiddenUpdate.status, 404);
+
+        const forbiddenDelete = await request(`/api/study-plans/${PLAN_ID}`, {
+            method: "DELETE",
+            headers: authRequest(USER_B).headers
+        });
+        assert.equal(forbiddenDelete.status, 404);
+        assert.equal(prismaClient.plans.length, 1);
+
+        const ownerRead = await request(`/api/study-plans/${PLAN_ID}`, authRequest(USER_A));
+        assert.equal(ownerRead.status, 200);
+        assert.equal((await ownerRead.json()).studyPlan.userId, USER_A);
+    });
+});
+
+test("nextSessionDate is the next scheduled date in the plan timezone", () => {
+    const plan = {
+        timeZone: "Asia/Colombo",
+        startDate: new Date("2026-11-21T00:00:00.000Z"),
+        endDate: new Date("2026-12-01T00:00:00.000Z"),
+        subjects: [{
+            scheduleItems: [{
+                dayOfWeek: "TUE",
+                startMinuteOfDay: 600
+            }]
+        }]
+    };
+
+    assert.equal(
+        getNextSessionDate(plan, new Date("2026-11-21T02:00:00.000Z")),
+        "2026-11-24"
+    );
+    assert.equal(
+        getNextSessionDate(plan, new Date("2026-11-24T02:00:00.000Z")),
+        "2026-11-24"
+    );
+    assert.equal(
+        getNextSessionDate(plan, new Date("2026-11-24T06:00:00.000Z")),
+        "2026-12-01"
+    );
+    assert.equal(getNextSessionDate({ ...plan, subjects: [] }), null);
 });
 
 test("GET list and active endpoints return the expected shapes for the caller", async () => {
@@ -159,7 +283,8 @@ test("GET list and active endpoints return the expected shapes for the caller", 
             return [{
                 id: PLAN_ID,
                 startDate: new Date("2026-11-16T00:00:00.000Z"),
-                endDate: new Date("2026-12-20T00:00:00.000Z")
+                endDate: new Date("2026-12-20T00:00:00.000Z"),
+                subjects: []
             }];
         },
         getActiveStudyPlan: async (userId) => {
@@ -175,7 +300,9 @@ test("GET list and active endpoints return the expected shapes for the caller", 
             studyPlans: [{
                 id: PLAN_ID,
                 startDate: "2026-11-16",
-                endDate: "2026-12-20"
+                endDate: "2026-12-20",
+                subjects: [],
+                nextSessionDate: null
             }]
         });
 
@@ -199,7 +326,9 @@ test("GET by ID returns the plan and hides missing or other-user plans as 404", 
     await withServer(service, async (request) => {
         const ownPlan = await request(`/api/study-plans/${PLAN_ID}`, authRequest());
         assert.equal(ownPlan.status, 200);
-        assert.deepEqual(await ownPlan.json(), { studyPlan: { id: PLAN_ID } });
+        assert.deepEqual(await ownPlan.json(), {
+            studyPlan: { id: PLAN_ID, nextSessionDate: null }
+        });
         assert.deepEqual(requestedBy, [USER_A, PLAN_ID]);
 
         shouldReturn = false;
@@ -210,7 +339,27 @@ test("GET by ID returns the plan and hides missing or other-user plans as 404", 
     });
 });
 
-test("PUT validates the complete payload and returns an updated plan", async () => {
+test("GET plan response includes the next scheduled occurrence date", async () => {
+    const service = createMockService({
+        getStudyPlanById: async () => ({
+            id: PLAN_ID,
+            startDate: new Date("2099-01-01T00:00:00.000Z"),
+            endDate: new Date("2099-01-10T00:00:00.000Z"),
+            timeZone: "UTC",
+            subjects: [{
+                scheduleItems: [{ dayOfWeek: "FRI", startMinuteOfDay: 600 }]
+            }]
+        })
+    });
+
+    await withServer(service, async (request) => {
+        const response = await request(`/api/study-plans/${PLAN_ID}`, authRequest());
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).studyPlan.nextSessionDate, "2099-01-02");
+    });
+});
+
+test("PUT and PATCH validate the complete payload and return an updated plan", async () => {
     let received;
     const service = createMockService({
         updateStudyPlan: async (...args) => {
@@ -232,7 +381,16 @@ test("PUT validates the complete payload and returns an updated plan", async () 
             jsonRequest("PUT", VALID_INPUT)
         );
         assert.equal(updated.status, 200);
-        assert.deepEqual(await updated.json(), { studyPlan: { id: PLAN_ID, title: "Updated" } });
+        assert.deepEqual(await updated.json(), {
+            studyPlan: { id: PLAN_ID, title: "Updated", nextSessionDate: null }
+        });
+        assert.deepEqual(received, [USER_A, PLAN_ID, VALID_INPUT]);
+
+        const patched = await request(
+            `/api/study-plans/${PLAN_ID}`,
+            jsonRequest("PATCH", VALID_INPUT)
+        );
+        assert.equal(patched.status, 200);
         assert.deepEqual(received, [USER_A, PLAN_ID, VALID_INPUT]);
     });
 });
@@ -261,7 +419,9 @@ test("PUT schedule persists the authenticated caller's validated plan schedule",
             jsonRequest("PUT", { schedule })
         );
         assert.equal(response.status, 200);
-        assert.deepEqual(await response.json(), { studyPlan: savedPlan });
+        assert.deepEqual(await response.json(), {
+            studyPlan: { ...savedPlan, nextSessionDate: null }
+        });
         assert.deepEqual(received, [USER_A, PLAN_ID, { schedule }]);
     });
 });
@@ -357,9 +517,10 @@ test("GET completions returns owner-scoped records with date-only occurrence dat
                 scheduleItemId: SCHEDULE_ITEM_ID,
                 occurrenceDate: "2026-11-16",
                 completedAt: "2026-11-16T12:00:00.000Z",
-                actualDurationMinutes: 45
-                }],
-                pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
+                actualDurationMinutes: 45,
+                completed: true
+            }],
+            pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
         });
         assert.deepEqual(completionQuery.where.occurrenceDate, {
             gte: new Date("2026-11-16T00:00:00.000Z"),
@@ -433,7 +594,8 @@ test("completion PUT creates or updates and DELETE returns the deleted completio
                 scheduleItemId: SCHEDULE_ITEM_ID,
                 occurrenceDate: "2026-11-16",
                 completedAt: "2026-11-16T12:00:00.000Z",
-                actualDurationMinutes: 35
+                actualDurationMinutes: 35,
+                completed: true
             }
         });
 
@@ -449,7 +611,8 @@ test("completion PUT creates or updates and DELETE returns the deleted completio
         assert.deepEqual(await deleteResponse.json(), {
             completion: {
                 scheduleItemId: SCHEDULE_ITEM_ID,
-                occurrenceDate: "2026-11-16"
+                occurrenceDate: "2026-11-16",
+                completed: false
             },
             deleted: true
         });

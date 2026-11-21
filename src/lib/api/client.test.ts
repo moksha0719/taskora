@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { aiApi, analyticsApi, authApi, focusApi, roomsApi, STUDY_PLANS_UPDATED_EVENT, studyPlansApi, tasksApi } from './client';
+import { aiApi, analyticsApi, authApi, flashcardsApi, focusApi, roomsApi, STUDY_PLANS_UPDATED_EVENT, studyPlansApi, tasksApi } from './client';
 import type {
   ApiStudyPlan,
   StudyCompletion,
@@ -25,6 +25,7 @@ const plan: ApiStudyPlan = {
   status: 'DRAFT',
   startDate: '2026-11-17',
   endDate: '2026-12-17',
+  nextSessionDate: null,
   timeZone: 'Asia/Colombo',
   weeklyTargetMinutes: 600,
   studyDaysPerWeek: 4,
@@ -174,6 +175,7 @@ describe('study plan calendar refresh notifications', () => {
       id: '550e8400-e29b-41d4-a716-446655440002',
       scheduleItemId: '550e8400-e29b-41d4-a716-446655440003',
       occurrenceDate: '2026-11-17',
+      completed: true,
       completedAt: '2026-11-17T12:00:00.000Z',
       actualDurationMinutes: 45,
     };
@@ -234,6 +236,23 @@ describe('study plan calendar refresh notifications', () => {
     await expect(authApi.forgotPassword('student@example.com')).resolves.toContain(
       'If an account exists'
     );
+  });
+
+  it('submits the reset token and new password to the password reset endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      message: 'Password reset successfully',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(authApi.resetPassword('opaque-token', 'new-password')).resolves.toBe(
+      'Password reset successfully'
+    );
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/auth/reset-password');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body as string)).toEqual({
+      token: 'opaque-token',
+      password: 'new-password',
+    });
   });
 
   it('loads analytics for the selected period', async () => {
@@ -388,5 +407,149 @@ describe('study plan calendar refresh notifications', () => {
     const [completionUrl, completionOptions] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(completionUrl).toContain('/api/focus/sessions');
     expect(JSON.parse(String(completionOptions.body))).toEqual({ sessionToken: token });
+  });
+
+  it('loads today focus totals from the authenticated daily summary endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      date: '2026-11-21',
+      timeZone: 'Asia/Colombo',
+      totalFocusMinutes: 45,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(focusApi.getTodaySummary()).resolves.toEqual({
+      date: '2026-11-21',
+      timeZone: 'Asia/Colombo',
+      totalFocusMinutes: 45,
+    });
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/api/focus-sessions/today');
+    expect(new URL(url).searchParams.get('timeZone'))
+      .toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
+  });
+
+  it('sends assistant messages through the authenticated assistant endpoint', async () => {
+    sessionStorage.setItem('taskora_ai_conversation_id', 'conversation-1');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      conversationId: 'conversation-1',
+      assistantMessage: {
+        id: 'assistant-1',
+        content: 'Break the work into three manageable steps.',
+        createdAt: '2026-11-21T08:00:00.000Z',
+      },
+      proposals: [],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(aiApi.generateAssistantResponse('Help me plan')).resolves.toMatchObject({
+      response: 'Break the work into three manageable steps.',
+      assistantMessageId: 'assistant-1',
+      proposals: [],
+    });
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/api/ai/assistant');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(String(options.body))).toEqual({
+      message: 'Help me plan',
+      conversationId: 'conversation-1',
+    });
+    expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
+  });
+
+  it('creates decks and cards and submits reviews through the flashcard API', async () => {
+    const savedCard = {
+      id: 'card-1',
+      deckId: 'deck-1',
+      front: 'Question',
+      back: 'Answer',
+      position: 0,
+      repetitions: 0,
+      intervalDays: 0,
+      easeFactor: 2.5,
+      reviewCount: 0,
+      dueAt: '2026-11-21T00:00:00.000Z',
+      lastReviewedAt: null,
+      createdAt: '2026-11-21T00:00:00.000Z',
+      updatedAt: '2026-11-21T00:00:00.000Z',
+    };
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        deck: {
+          id: 'deck-1',
+          userId: 'user-1',
+          title: 'Biology',
+          description: null,
+          createdAt: '2026-11-21T00:00:00.000Z',
+          updatedAt: '2026-11-21T00:00:00.000Z',
+        },
+      }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ card: savedCard }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        card: {
+          ...savedCard,
+          repetitions: 1,
+          intervalDays: 1,
+          reviewCount: 1,
+          dueAt: '2026-11-22T00:00:00.000Z',
+          lastReviewedAt: '2026-11-21T00:00:00.000Z',
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(flashcardsApi.createDeck({ title: 'Biology' })).resolves.toMatchObject({
+      id: 'deck-1',
+      cardCount: 0,
+    });
+    await expect(flashcardsApi.createCard('deck-1', {
+      front: 'Question',
+      back: 'Answer',
+    })).resolves.toMatchObject({ id: 'card-1' });
+    await expect(flashcardsApi.reviewCard('card-1', 4)).resolves.toMatchObject({
+      intervalDays: 1,
+      dueAt: '2026-11-22T00:00:00.000Z',
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      '/api/flashcards/decks',
+      '/api/flashcards/decks/deck-1/cards',
+      '/api/flashcards/cards/card-1/review',
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ title: 'Biology' });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      front: 'Question',
+      back: 'Answer',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ quality: 4 });
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get('Authorization'))
+      .toBe('Bearer test-token');
+  });
+
+  it('loads calendar plans from the backend with the server-computed next session date', async () => {
+    const calendarPlan = { ...plan, nextSessionDate: '2026-11-24' };
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        studyPlans: [{ id: calendarPlan.id }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        studyPlan: calendarPlan,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(studyPlansApi.getCalendarPlans()).resolves.toEqual([calendarPlan]);
+
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      '/api/study-plans',
+      `/api/study-plans/${calendarPlan.id}`,
+    ]);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization'))
+      .toBe('Bearer test-token');
   });
 });

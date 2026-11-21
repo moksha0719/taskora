@@ -21,6 +21,7 @@ The study-plan router applies authentication to every endpoint. Middleware verif
 | `GET` | `/api/study-plans/active` | `200`, `{ "studyPlan": ... }` or `{ "studyPlan": null }` |
 | `GET` | `/api/study-plans/:id` | `200`, `{ "studyPlan": ... }` |
 | `PUT` | `/api/study-plans/:id` | `200`, `{ "studyPlan": ... }` |
+| `PATCH` | `/api/study-plans/:id` | `200`, `{ "studyPlan": ... }` |
 | `DELETE` | `/api/study-plans/:id` | `204`, no response body |
 | `PUT` | `/api/study-plans/:id/schedule` | `200`, `{ "studyPlan": ... }` |
 | `POST` | `/api/study-plans/generate` | `200`, `{ "schedule": [...] }` |
@@ -34,7 +35,7 @@ The study-plan router applies authentication to every endpoint. Middleware verif
 
 ## Study plan create and update
 
-`POST /api/study-plans` creates a `DRAFT` plan. `PUT /api/study-plans/:id` accepts a complete replacement payload, not a partial update, and is allowed only while the plan is `DRAFT`. The supplied subjects replace the existing subjects.
+`POST /api/study-plans` creates a `DRAFT` plan. `PUT` and `PATCH /api/study-plans/:id` accept a complete replacement payload, not a partial update, and are allowed only while the plan is `DRAFT`. The supplied subjects replace the existing subjects.
 
 ```json
 {
@@ -88,7 +89,10 @@ Optional subject fields:
 
 The sum of all `subjects[].targetMinutesPerWeek` values must equal `weeklyTargetMinutes`. `userId`, `status`, and other unsupported fields are rejected.
 
-Successful create and update responses contain the persisted plan and its subjects. A plan includes the schema scalar fields `id`, `userId`, `activeUserId`, `title`, `status`, `startDate`, `endDate`, `timeZone`, `weeklyTargetMinutes`, `studyDaysPerWeek`, `createdAt`, and `updatedAt`. Plan `startDate` and `endDate` are serialized as civil dates in `YYYY-MM-DD` format; `createdAt` and `updatedAt` remain UTC ISO timestamps.
+Successful create and update responses contain the persisted plan and its subjects. A plan includes the schema scalar fields `id`, `userId`, `activeUserId`, `title`, `status`, `startDate`, `endDate`, `timeZone`, `weeklyTargetMinutes`, `studyDaysPerWeek`, `createdAt`, and `updatedAt`. Plan `startDate` and `endDate` are serialized as civil dates in `YYYY-MM-DD` format; `createdAt` and `updatedAt` remain UTC ISO timestamps. `nextSessionDate` is the
+next scheduled occurrence on or after the current time in the plan timezone,
+formatted as `YYYY-MM-DD`; it is `null` when the plan has no schedule or no
+future occurrence within its date range.
 
 Example create response (IDs and timestamps are illustrative):
 
@@ -102,6 +106,7 @@ Example create response (IDs and timestamps are illustrative):
     "status": "DRAFT",
     "startDate": "2026-11-16",
     "endDate": "2026-12-20",
+    "nextSessionDate": null,
     "timeZone": "Asia/Colombo",
     "weeklyTargetMinutes": 600,
     "studyDaysPerWeek": 4,
@@ -121,7 +126,16 @@ Example create response (IDs and timestamps are illustrative):
 }
 ```
 
-`GET /api/study-plans` returns only the caller's plans, each with its subjects. `GET /api/study-plans/active` returns the caller's active plan with subjects and their schedule items, or `null`. `GET /api/study-plans/:id` returns an owned plan with subjects and schedule items. Schedule items include their schema scalar fields, including `dayOfWeek`, `startMinuteOfDay`, `durationMinutes`, `kind`, and `topics`; completion records are not included in these responses.
+`GET /api/study-plans` returns only the caller's plans, each with its subjects
+and schedule items. `GET /api/study-plans/active` returns the caller's active
+plan with subjects and their schedule items, or `null`. `GET /api/study-plans/:id`
+returns an owned plan with subjects and schedule items.
+Schedule items include their schema scalar fields, including `dayOfWeek`,
+`startMinuteOfDay`, `durationMinutes`, `kind`, and `topics`; completion records
+are retrieved separately by the requested calendar date range.
+
+All plan read, update, and delete queries are scoped to the authenticated user.
+Missing and other users' plans return the same `404` response.
 
 `DELETE /api/study-plans/:id` deletes only owned `DRAFT` or `ARCHIVED` plans
 that have no completed sessions. `ACTIVE` plans cannot be deleted. If a plan
@@ -304,7 +318,8 @@ Success (`200`), ordered by occurrence date and then schedule-item ID:
       "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       "occurrenceDate": "2026-11-16",
       "completedAt": "2026-11-16T12:00:00.000Z",
-      "actualDurationMinutes": 45
+      "actualDurationMinutes": 45,
+      "completed": true
     }
   ],
   "pagination": {
@@ -349,7 +364,8 @@ Successful `PUT` response:
     "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     "occurrenceDate": "2026-11-16",
     "completedAt": "2026-11-16T12:00:00.000Z",
-    "actualDurationMinutes": 45
+    "actualDurationMinutes": 45,
+    "completed": true
   }
 }
 ```
@@ -364,7 +380,8 @@ occurrence date in the same civil-date format:
 {
   "completion": {
     "scheduleItemId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    "occurrenceDate": "2026-11-16"
+    "occurrenceDate": "2026-11-16",
+    "completed": false
   },
   "deleted": true
 }

@@ -594,6 +594,41 @@ function mapBackendProposal(
 }
 
 export const aiApi = {
+  async generateAssistantResponse(message: string): Promise<{
+    response: string;
+    assistantMessageId: string;
+    timestamp: string;
+    proposals: AIProposal[];
+  }> {
+    let conversationId = getAiConversationId();
+    if (!conversationId) {
+      conversationId = (await this.createConversation()).id;
+    }
+    const result = await requestApi<{
+      conversationId: string;
+      assistantMessage: { id: string; content: string; createdAt: string };
+      proposals: Array<{
+        id: string;
+        payload: { title?: string; description?: string; priority?: string; dueDate?: string };
+        status: string;
+        createdAt: string;
+      }>;
+    }>('/api/ai/assistant', {
+      method: 'POST',
+      body: JSON.stringify({ message, conversationId }),
+    });
+    setAiConversationId(result.conversationId);
+    return {
+      response: result.assistantMessage.content,
+      assistantMessageId: result.assistantMessage.id,
+      timestamp: new Date(result.assistantMessage.createdAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      proposals: result.proposals.map((proposal) => mapBackendProposal(proposal)),
+    };
+  },
+
   getActiveConversationId(): string | null {
     return getAiConversationId();
   },
@@ -886,6 +921,14 @@ export const notesApi = {
 // FOCUS MODE API (TC05)
 // ==========================================
 export const focusApi = {
+  async getTodaySummary(): Promise<{ date: string; timeZone: string; totalFocusMinutes: number }> {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const query = timeZone ? `?timeZone=${encodeURIComponent(timeZone)}` : '';
+    return requestApi<{ date: string; timeZone: string; totalFocusMinutes: number }>(
+      `/api/focus-sessions/today${query}`
+    );
+  },
+
   async startSession(subject: string, durationMinutes: number): Promise<string> {
     const { sessionToken } = await requestApi<{ sessionToken: string }>('/api/focus/sessions/start', {
       method: 'POST',

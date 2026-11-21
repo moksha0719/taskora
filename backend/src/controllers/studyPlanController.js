@@ -7,6 +7,7 @@ const logSafeError = require("../lib/logSafeError");
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MAX_PRISMA_INT = 2147483647;
+const WEEKDAY_CODES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const SCHEDULE_PREVIEW_FIELDS = new Set([
     "plan",
     "subjects",
@@ -53,6 +54,55 @@ function dateOnly(value) {
     return date.toISOString().slice(0, 10);
 }
 
+function getNextSessionDate(studyPlan, now = new Date()) {
+    const subjects = Array.isArray(studyPlan.subjects) ? studyPlan.subjects : [];
+    const scheduleItems = subjects.flatMap((subject) =>
+        Array.isArray(subject.scheduleItems) ? subject.scheduleItems : []
+    );
+    if (scheduleItems.length === 0 || !studyPlan.startDate || !studyPlan.endDate) {
+        return null;
+    }
+
+    const timeZone = studyPlan.timeZone || "UTC";
+    const localParts = new Intl.DateTimeFormat("en-GB", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23"
+    }).formatToParts(now);
+    const localValue = Object.fromEntries(localParts.map((part) => [part.type, part.value]));
+    const today = `${localValue.year}-${localValue.month}-${localValue.day}`;
+    const currentMinute = Number(localValue.hour) * 60 + Number(localValue.minute);
+    const startDate = dateOnly(studyPlan.startDate);
+    const endDate = dateOnly(studyPlan.endDate);
+    const firstDate = today < startDate ? startDate : today;
+    const sessionsByDay = new Map();
+    for (const item of scheduleItems) {
+        if (!sessionsByDay.has(item.dayOfWeek)) {
+            sessionsByDay.set(item.dayOfWeek, []);
+        }
+        sessionsByDay.get(item.dayOfWeek).push(item.startMinuteOfDay);
+    }
+
+    for (let candidate = new Date(`${firstDate}T00:00:00.000Z`);; candidate.setUTCDate(candidate.getUTCDate() + 1)) {
+        const candidateDate = candidate.toISOString().slice(0, 10);
+        if (candidateDate > endDate) {
+            return null;
+        }
+        const dayOfWeek = WEEKDAY_CODES[candidate.getUTCDay()];
+        const sessionTimes = sessionsByDay.get(dayOfWeek);
+        if (
+            sessionTimes &&
+            (candidateDate > today || sessionTimes.some((startMinute) => startMinute >= currentMinute))
+        ) {
+            return candidateDate;
+        }
+    }
+}
+
 function serializeStudyPlan(studyPlan) {
     if (!studyPlan) {
         return studyPlan;
@@ -61,14 +111,16 @@ function serializeStudyPlan(studyPlan) {
     return {
         ...studyPlan,
         ...(studyPlan.startDate == null ? {} : { startDate: dateOnly(studyPlan.startDate) }),
-        ...(studyPlan.endDate == null ? {} : { endDate: dateOnly(studyPlan.endDate) })
+        ...(studyPlan.endDate == null ? {} : { endDate: dateOnly(studyPlan.endDate) }),
+        nextSessionDate: getNextSessionDate(studyPlan)
     };
 }
 
-function serializeCompletion(completion) {
+function serializeCompletion(completion, completed = true) {
     return {
         ...completion,
-        occurrenceDate: dateOnly(completion.occurrenceDate)
+        occurrenceDate: dateOnly(completion.occurrenceDate),
+        completed
     };
 }
 
@@ -377,7 +429,7 @@ function createStudyPlanController(
                 req.params.itemId,
                 req.params.date
             );
-            return res.json({ completion: serializeCompletion(completion), deleted: true });
+            return res.json({ completion: serializeCompletion(completion, false), deleted: true });
         } catch (error) {
             return sendCompletionError(error, res);
         }
@@ -405,7 +457,7 @@ function createStudyPlanController(
                 { page: req.query.page, limit: req.query.limit }
             );
             return res.json({
-                completions: result.completions.map(serializeCompletion),
+                completions: result.completions.map((completion) => serializeCompletion(completion)),
                 pagination: result.pagination
             });
         } catch (error) {
@@ -431,3 +483,4 @@ function createStudyPlanController(
 }
 
 module.exports = createStudyPlanController;
+module.exports.getNextSessionDate = getNextSessionDate;

@@ -134,7 +134,7 @@ test("create validates input and writes a DRAFT owned by the caller with nested 
             targetMinutesPerWeek: 480
         }
     ]);
-    assert.equal(args.include.subjects, true);
+    assert.equal(args.include.subjects.include.scheduleItems, true);
 });
 
 test("create rejects client-controlled identity/status fields and invalid payloads", async () => {
@@ -195,7 +195,7 @@ test("list scopes plans to the requested user and includes subjects", async () =
 
     assert.equal(await service.listStudyPlans(USER_A), expected);
     assert.deepEqual(args.where, { userId: USER_A });
-    assert.equal(args.include.subjects, true);
+    assert.equal(args.include.subjects.include.scheduleItems, true);
 });
 
 test("active plan lookup includes schedules and returns null when absent", async () => {

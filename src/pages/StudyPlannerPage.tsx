@@ -121,6 +121,15 @@ function formatHours(minutes: number): string {
   return `${(minutes / 60).toFixed(1).replace(/\.0$/, '')}h`;
 }
 
+function formatPlanDate(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(year, month - 1, day));
+}
+
 function scheduleItemsFor(plan: ApiStudyPlan): (StudyScheduleItem & {
   subjectName: string;
   subjectColor: string;
@@ -615,6 +624,9 @@ export const StudyPlannerPage: React.FC = () => {
                 {' · '}{formatHours(plan.weeklyTargetMinutes)} weekly target
                 {' · '}{plan.studyDaysPerWeek} study days
                 {' · '}{plan.timeZone}
+              </p>
+              <p className="mt-1 text-xs text-muted-purple">
+                Next session: {plan.nextSessionDate ? formatPlanDate(plan.nextSessionDate) : 'No upcoming sessions'}
               </p>
             </div>
             {plans.length > 1 && (

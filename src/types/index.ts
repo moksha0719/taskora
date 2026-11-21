@@ -102,6 +102,7 @@ export interface ApiStudyPlan {
   status: StudyPlanStatus;
   startDate: string;
   endDate: string;
+  nextSessionDate: string | null;
   timeZone: string;
   weeklyTargetMinutes: number;
   studyDaysPerWeek: number;
@@ -155,6 +156,7 @@ export interface StudyCompletion {
   id: string;
   scheduleItemId: string;
   occurrenceDate: string;
+  completed: boolean;
   completedAt: string;
   actualDurationMinutes: number | null;
 }

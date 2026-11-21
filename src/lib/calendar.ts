@@ -1,4 +1,4 @@
-import { ApiStudyPlan, Task } from '../types';
+import { ApiStudyPlan, StudyCompletion, Task } from '../types';
 
 export interface CalendarEvent {
   id: string;
@@ -9,6 +9,8 @@ export interface CalendarEvent {
   time?: string;
   endTime?: string;
   details?: string;
+  completed?: boolean;
+  isNextSession?: boolean;
 }
 
 const WEEKDAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
@@ -51,7 +53,8 @@ export function getCalendarEvents(
   tasks: Task[],
   plans: ApiStudyPlan[],
   start: Date,
-  endExclusive: Date
+  endExclusive: Date,
+  completions: StudyCompletion[] = []
 ): CalendarEvent[] {
   const startKey = toDateKey(start);
   const endKey = toDateKey(endExclusive);
@@ -67,6 +70,11 @@ export function getCalendarEvents(
     }));
 
   const studyEvents: CalendarEvent[] = [];
+  const completedOccurrences = new Set(
+    completions
+      .filter((completion) => completion.completed)
+      .map((completion) => `${completion.scheduleItemId}:${completion.occurrenceDate.slice(0, 10)}`)
+  );
 
   for (let date = start; toDateKey(date) < endKey; date = addCalendarDays(date, 1)) {
     const dateKey = toDateKey(date);
@@ -87,6 +95,8 @@ export function getCalendarEvents(
             time: formatCalendarTime(item.startMinuteOfDay),
             endTime: formatCalendarTime(item.startMinuteOfDay + item.durationMinutes),
             details: [plan.title, ...item.topics].join(' · '),
+            completed: completedOccurrences.has(`${item.id}:${dateKey}`),
+            isNextSession: plan.nextSessionDate === dateKey,
           });
         }
       }

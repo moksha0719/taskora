@@ -7,6 +7,12 @@ import { NotificationItem } from '../types';
 import { CheckCheck, Trash2, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+const dispatchNotificationsUpdated = (unreadCountDelta: number) => {
+  window.dispatchEvent(new CustomEvent('taskora:notifications-updated', {
+    detail: { unreadCountDelta },
+  }));
+};
+
 export const NotificationsPage: React.FC = () => {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -33,11 +39,12 @@ export const NotificationsPage: React.FC = () => {
   }, []);
 
   const handleMarkRead = async (id: string) => {
+    const unreadCountDelta = notifications.some((item) => item.id === id && !item.read) ? -1 : 0;
     setActionBusy(true);
     setActionError(null);
     try {
       await notificationsApi.markRead(id);
-      window.dispatchEvent(new Event('taskora:notifications-updated'));
+      dispatchNotificationsUpdated(unreadCountDelta);
       await fetchNotifs();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Unable to mark the notification as read.');
@@ -47,11 +54,12 @@ export const NotificationsPage: React.FC = () => {
   };
 
   const handleMarkAllRead = async () => {
+    const unreadCountDelta = -notifications.filter((item) => !item.read).length;
     setActionBusy(true);
     setActionError(null);
     try {
       await notificationsApi.markAllRead();
-      window.dispatchEvent(new Event('taskora:notifications-updated'));
+      dispatchNotificationsUpdated(unreadCountDelta);
       await fetchNotifs();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Unable to mark all notifications as read.');
@@ -61,11 +69,12 @@ export const NotificationsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    const unreadCountDelta = notifications.some((item) => item.id === id && !item.read) ? -1 : 0;
     setActionBusy(true);
     setActionError(null);
     try {
       await notificationsApi.deleteNotification(id);
-      window.dispatchEvent(new Event('taskora:notifications-updated'));
+      dispatchNotificationsUpdated(unreadCountDelta);
       await fetchNotifs();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Unable to delete the notification.');

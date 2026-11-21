@@ -4,7 +4,10 @@ const test = require("node:test");
 const jwt = require("jsonwebtoken");
 const createApp = require("../src/app");
 const { JWT_AUDIENCE, JWT_ISSUER } = require("../src/config/auth");
-const { NotificationServiceError } = require("../src/services/notificationService");
+const {
+    createNotificationService,
+    NotificationServiceError
+} = require("../src/services/notificationService");
 
 const TEST_SECRET = "notification-routes-test-secret-with-at-least-32-bytes";
 const USER_A = "11111111-1111-4111-8111-111111111111";
@@ -153,6 +156,80 @@ test("all notification endpoints require authentication and use the authenticate
         assert.equal(response.status, 200);
     });
     assert.deepEqual(calls, [[USER_B]]);
+});
+
+test("unread counts are user-scoped and decrease when a notification is read", async () => {
+    const notifications = [];
+    let nextId = 0;
+    const matchesWhere = (notification, where) => Object.entries(where)
+        .every(([key, value]) => notification[key] === value);
+    const prismaClient = {
+        notification: {
+            create: async ({ data }) => {
+                const notification = {
+                    ...data,
+                    id: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${nextId++}`,
+                    readAt: null,
+                    createdAt: new Date("2026-01-01T00:00:00.000Z")
+                };
+                notifications.push(notification);
+                return notification;
+            },
+            count: async ({ where }) => notifications
+                .filter((notification) => matchesWhere(notification, where)).length,
+            updateMany: async ({ where, data }) => {
+                const matching = notifications.filter((notification) =>
+                    matchesWhere(notification, where)
+                );
+                matching.forEach((notification) => Object.assign(notification, data));
+                return { count: matching.length };
+            },
+            findFirst: async ({ where }) => notifications.find((notification) =>
+                matchesWhere(notification, where)
+            ) || null
+        },
+        $transaction: async (callback) => callback(prismaClient)
+    };
+    const notificationService = createNotificationService({
+        prismaClient,
+        clock: () => new Date("2026-01-02T00:00:00.000Z")
+    });
+
+    await notificationService.createNotification({
+        userId: USER_A,
+        type: "system",
+        title: "Test notification",
+        message: "Unread for user A"
+    });
+
+    await withServer(notificationService, async (request) => {
+        const userBCount = await request("/api/notifications/unread-count", authRequest(USER_B));
+        assert.deepEqual(await userBCount.json(), { unreadCount: 0 });
+
+        const userACount = await request("/api/notifications/unread-count", authRequest(USER_A));
+        assert.deepEqual(await userACount.json(), { unreadCount: 1 });
+
+        const readResponse = await request(
+            `/api/notifications/${notifications[0].id}/read`,
+            { ...authRequest(USER_A), method: "PATCH" }
+        );
+        assert.equal(readResponse.status, 200);
+        assert.deepEqual((await readResponse.json()).notification, {
+            id: notifications[0].id,
+            userId: USER_A,
+            type: "system",
+            title: "Test notification",
+            message: "Unread for user A",
+            read: true,
+            actionUrl: null,
+            createdAt: "2026-01-01T00:00:00.000Z"
+        });
+
+        const updatedUserACount = await request("/api/notifications/unread-count", authRequest(USER_A));
+        assert.deepEqual(await updatedUserACount.json(), { unreadCount: 0 });
+        const unchangedUserBCount = await request("/api/notifications/unread-count", authRequest(USER_B));
+        assert.deepEqual(await unchangedUserBCount.json(), { unreadCount: 0 });
+    });
 });
 
 test("invalid notification IDs and query values return 400 without service calls", async () => {

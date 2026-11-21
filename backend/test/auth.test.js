@@ -324,3 +324,47 @@ test("authentication routes apply a shared request limit", async () => {
         assert.equal(responses[10].status, 429);
     });
 });
+
+test("password change rejects oversized current passwords before querying user data", async () => {
+    const user = {
+        id: "test-user-id",
+        name: "Alex Doe",
+        email: "alex@example.com",
+        password: "unused-test-hash",
+        createdAt: new Date(),
+        updatedAt: new Date()
+    };
+    const prisma = createPrismaMock(user);
+    let userLookups = 0;
+    const findUnique = prisma.user.findUnique;
+    prisma.user.findUnique = async (...args) => {
+        userLookups += 1;
+        return findUnique(...args);
+    };
+    const token = jwt.sign({}, TEST_SECRET, {
+        algorithm: "HS256",
+        audience: JWT_AUDIENCE,
+        expiresIn: "1h",
+        issuer: JWT_ISSUER,
+        subject: user.id
+    });
+
+    await withServer(prisma, async (request) => {
+        const response = await request("/api/auth/password", {
+            method: "PATCH",
+            headers: {
+                authorization: `Bearer ${token}`,
+                "content-type": "application/json"
+            },
+            body: JSON.stringify({
+                currentPassword: "x".repeat(73),
+                newPassword: "NewPassword123!"
+            })
+        });
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), {
+            error: "Current password and a valid new password are required"
+        });
+    });
+    assert.equal(userLookups, 0);
+});
