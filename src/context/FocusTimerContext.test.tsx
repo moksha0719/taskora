@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FocusTimerProvider, useFocusTimer } from './FocusTimerContext';
 import { focusApi } from '../lib/api/client';
@@ -30,6 +31,19 @@ const TimerControls: React.FC = () => {
 
 function renderTimer() {
   return render(<FocusTimerProvider><TimerControls /></FocusTimerProvider>);
+}
+
+function renderNavigableTimer() {
+  return render(
+    <FocusTimerProvider>
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route path="/dashboard" element={<><TimerControls /><Link to="/focus">Open Focus</Link></>} />
+          <Route path="/focus" element={<><TimerControls /><Link to="/dashboard">Back to dashboard</Link></>} />
+        </Routes>
+      </MemoryRouter>
+    </FocusTimerProvider>
+  );
 }
 
 describe('FocusTimerProvider', () => {
@@ -65,6 +79,25 @@ describe('FocusTimerProvider', () => {
 
     expect(screen.getByLabelText('seconds remaining')).toHaveTextContent('1495');
     expect(screen.getByLabelText('timer status')).toHaveTextContent('active');
+  });
+
+  it('keeps the active timer state when navigating between dashboard and focus pages', async () => {
+    renderNavigableTimer();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start timer' }));
+    });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open Focus' }));
+    expect(screen.getByLabelText('timer status')).toHaveTextContent('active');
+    expect(screen.getByLabelText('seconds remaining')).toHaveTextContent('1495');
+
+    fireEvent.click(screen.getByRole('link', { name: 'Back to dashboard' }));
+    expect(screen.getByLabelText('timer status')).toHaveTextContent('active');
+    expect(screen.getByLabelText('seconds remaining')).toHaveTextContent('1495');
+    expect(focusApi.startSession).toHaveBeenCalledTimes(1);
   });
 
   it('preserves elapsed time when paused and does not create another server session on resume', async () => {

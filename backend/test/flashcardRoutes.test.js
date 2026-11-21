@@ -32,8 +32,10 @@ function authHeader(userId) {
 test("flashcard routes require authentication and scope deck access to its owner", async (t) => {
     process.env.JWT_SECRET = "taskora-flashcard-route-test-secret-at-least-32";
     const ownerId = "11111111-1111-4111-8111-111111111111";
-    const storedDecks = new Map([["deck-1", {
-        id: "deck-1",
+    const deckId = "33333333-3333-4333-8333-333333333333";
+    const cardId = "44444444-4444-4444-8444-444444444444";
+    const storedDecks = new Map([[deckId, {
+        id: deckId,
         userId: ownerId,
         title: "Test deck",
         description: null,
@@ -64,7 +66,7 @@ test("flashcard routes require authentication and scope deck access to its owner
             },
             create: async (args) => {
                 const deck = {
-                    id: "deck-new", ...args.data,
+                    id: "55555555-5555-4555-8555-555555555555", ...args.data,
                     createdAt: new Date(), updatedAt: new Date(), cards: []
                 };
                 storedDecks.set(deck.id, deck);
@@ -88,7 +90,7 @@ test("flashcard routes require authentication and scope deck access to its owner
             count: async (args) => storedCards.size,
             create: async (args) => {
                 const card = {
-                    id: "card-1", repetitions: 0, intervalDays: 0, easeFactor: 2.5,
+                    id: cardId, repetitions: 0, intervalDays: 0, easeFactor: 2.5,
                     reviewCount: 0, dueAt: new Date(), lastReviewedAt: null,
                     createdAt: new Date(), updatedAt: new Date(), ...args.data
                 };
@@ -123,19 +125,19 @@ test("flashcard routes require authentication and scope deck access to its owner
     assert.equal(list.status, 200);
     assert.equal((await list.json()).decks[0]._count.cards, 0);
 
-    const otherUserRead = await fetch(`${server.baseUrl}/api/flashcards/decks/deck-1`, {
+    const otherUserRead = await fetch(`${server.baseUrl}/api/flashcards/decks/${deckId}`, {
         headers: authHeader("22222222-2222-4222-8222-222222222222")
     });
     assert.equal(otherUserRead.status, 404);
 
-    const invalidCard = await fetch(`${server.baseUrl}/api/flashcards/decks/deck-1/cards`, {
+    const invalidCard = await fetch(`${server.baseUrl}/api/flashcards/decks/${deckId}/cards`, {
         method: "POST",
         headers: { ...authHeader(ownerId), "Content-Type": "application/json" },
         body: JSON.stringify({ front: "Question", back: "Answer", userId: "another-user" })
     });
     assert.equal(invalidCard.status, 400);
 
-    const created = await fetch(`${server.baseUrl}/api/flashcards/decks/deck-1/cards`, {
+    const created = await fetch(`${server.baseUrl}/api/flashcards/decks/${deckId}/cards`, {
         method: "POST",
         headers: { ...authHeader(ownerId), "Content-Type": "application/json" },
         body: JSON.stringify({ front: "Question", back: "Answer" })
@@ -143,12 +145,49 @@ test("flashcard routes require authentication and scope deck access to its owner
     assert.equal(created.status, 201);
     assert.equal((await created.json()).card.position, 0);
 
-    const invalidReview = await fetch(`${server.baseUrl}/api/flashcards/cards/card-1/review`, {
+    const invalidReview = await fetch(`${server.baseUrl}/api/flashcards/cards/${cardId}/review`, {
         method: "POST",
         headers: { ...authHeader(ownerId), "Content-Type": "application/json" },
         body: JSON.stringify({ quality: 6 })
     });
     assert.equal(invalidReview.status, 400);
+    for (const quality of [-1, 0.5, 6, "4", null]) {
+        const invalidQuality = await fetch(`${server.baseUrl}/api/flashcards/${cardId}/review`, {
+            method: "POST",
+            headers: { ...authHeader(ownerId), "Content-Type": "application/json" },
+            body: JSON.stringify({ quality })
+        });
+        assert.equal(invalidQuality.status, 400);
+    }
+
+    const otherUserCardUpdate = await fetch(`${server.baseUrl}/api/flashcards/cards/${cardId}`, {
+        method: "PATCH",
+        headers: { ...authHeader("22222222-2222-4222-8222-222222222222"), "Content-Type": "application/json" },
+        body: JSON.stringify({ front: "Another user's card" })
+    });
+    assert.equal(otherUserCardUpdate.status, 404);
+
+    const invalidIdRequests = [
+        ["GET", "/api/flashcards/decks/not-a-uuid"],
+        ["PATCH", "/api/flashcards/decks/not-a-uuid", { title: "Changed" }],
+        ["DELETE", "/api/flashcards/decks/not-a-uuid"],
+        ["POST", "/api/flashcards/decks/not-a-uuid/cards", { front: "Q", back: "A" }],
+        ["PATCH", "/api/flashcards/cards/not-a-uuid", { front: "Changed" }],
+        ["DELETE", "/api/flashcards/cards/not-a-uuid"],
+        ["POST", "/api/flashcards/cards/not-a-uuid/review", { quality: 4 }],
+        ["POST", "/api/flashcards/not-a-uuid/review", { quality: 4 }]
+    ];
+    for (const [method, path, body] of invalidIdRequests) {
+        const response = await fetch(`${server.baseUrl}${path}`, {
+            method,
+            headers: {
+                ...authHeader(ownerId),
+                ...(body ? { "Content-Type": "application/json" } : {})
+            },
+            ...(body ? { body: JSON.stringify(body) } : {})
+        });
+        assert.equal(response.status, 400, `${method} ${path} should reject malformed IDs`);
+    }
 });
 
 test("SM-2 review scheduling resets failed cards and advances successful cards", () => {

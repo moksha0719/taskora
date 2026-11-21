@@ -18,7 +18,8 @@ const DISABLED_DOTENV_PATH = path.join(
 );
 const INTEGRATION_TESTS = [
     "test/integration/postgresPersistence.test.js",
-    "test/integration/task3Task4Persistence.test.js"
+    "test/integration/task3Task4Persistence.test.js",
+    "test/integration/flashcardReview.test.js"
 ];
 
 function randomPassword() {

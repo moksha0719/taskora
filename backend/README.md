@@ -40,6 +40,7 @@ frontend variables.
 | `EMAIL_FROM` | Required for Resend; sender address verified by the provider. |
 | `EMAIL_FROM_NAME` | Required for Resend; defaults to `Taskora` for webhook payloads. |
 | `PASSWORD_RESET_URL` | Frontend `/forgot-password` URL. Required for Resend; use the deployed HTTPS URL in production. |
+| `PASSWORD_RESET_TOKEN_TTL_MINUTES` | Optional reset-token lifetime in minutes; defaults to `30`, allowed range is `1`–`1440`. |
 | `EMAIL_DELIVERY_TIMEOUT_MS` | Optional provider request timeout in milliseconds; defaults to `5000`, maximum `60000`. |
 | `PASSWORD_RESET_DELIVERY_URL` | Required when `EMAIL_PROVIDER=webhook`; HTTPS is required in production. If set without `EMAIL_PROVIDER`, it preserves the legacy webhook selection. |
 | `PASSWORD_RESET_DELIVERY_AUTHORIZATION` | Optional custom webhook authorization header value. |
@@ -108,6 +109,16 @@ npm run db:generate
 npm run db:validate
 npm run db:deploy
 ```
+
+To check the configured development database's migration status without
+applying migrations, run this from PowerShell in `backend`:
+
+```powershell
+.\scripts\check-dev-migration-status.ps1
+```
+
+The script delegates to `npm run db:status` (`prisma migrate status`) and
+returns its exit code. It does not apply or modify migrations.
 
 The forward-only migrations add the persisted product models, including SM-2
 flashcard review state and shared room-timer start timestamps, preserve task
@@ -322,7 +333,7 @@ Owner-scoped product APIs are also mounted under `/api`:
 
 - Habits: `GET/POST /api/habits`, `PUT /api/habits/:id/check-ins`, `DELETE /api/habits/:id`
 - Notes: `GET/POST /api/notes`, `PUT/DELETE /api/notes/:id`, public shared-note retrieval at `GET /api/notes/shared/:shareCode`
-- Focus: `GET /api/focus/sessions`, `POST /api/focus/sessions/start`, and `POST /api/focus/sessions` to complete a server-timed session. XP is awarded only once, after the signed session duration elapses; overlapping and replayed completions are rejected.
+- Focus: `GET /api/focus/sessions`, `POST /api/focus/sessions/start`, and `POST /api/focus/sessions` to complete a server-timed session. The compatible `POST /api/focus-sessions` route is also available, along with `GET /api/focus-sessions/today`. Completion replays return the original session without awarding XP again.
 - Study rooms: `GET/POST /api/study-rooms`, `POST /api/study-rooms/:id/join`, `POST /api/study-rooms/:id/messages`
 - Gamification: `GET /api/gamification`; XP transactions are created by trusted server workflows, not a client-write endpoint.
 - Analytics: `GET /api/analytics`

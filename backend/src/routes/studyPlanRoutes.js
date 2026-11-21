@@ -29,6 +29,7 @@ function createStudyPlanRouter(studyPlanService, studyScheduleService, scheduleC
     router.get("/:id", controller.getById);
     router.put("/:id/schedule", controller.saveSchedule);
     router.put("/:id", controller.update);
+    router.patch("/:id", controller.update);
     router.delete("/:id", controller.remove);
 
     return router;

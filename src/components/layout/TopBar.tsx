@@ -30,34 +30,53 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const notificationRequest = React.useRef(0);
 
   const loadNotifications = React.useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      notificationRequest.current += 1;
+      setNotifications([]);
+      setUnreadCount(0);
+      setNotificationError(null);
+      setLoadingNotifications(false);
+      return;
+    }
+    const requestId = ++notificationRequest.current;
     setLoadingNotifications(true);
     try {
       const [items, unread] = await Promise.all([
         notificationsApi.getNotifications(),
         notificationsApi.getUnreadCount(),
       ]);
-      setNotifications(items);
-      setUnreadCount(unread);
-      setNotificationError(null);
+      if (requestId === notificationRequest.current) {
+        setNotifications(items);
+        setUnreadCount(unread);
+        setNotificationError(null);
+      }
     } catch (cause) {
-      setNotificationError(cause instanceof Error ? cause.message : 'Unable to load notifications.');
+      if (requestId === notificationRequest.current) {
+        setNotificationError(cause instanceof Error ? cause.message : 'Unable to load notifications.');
+      }
     } finally {
-      setLoadingNotifications(false);
+      if (requestId === notificationRequest.current) setLoadingNotifications(false);
     }
   }, [user]);
 
   React.useEffect(() => {
     if (!user) {
-      setNotifications([]);
-      setUnreadCount(0);
-      setNotificationError(null);
+      void loadNotifications();
       return;
     }
     void loadNotifications();
-    const refresh = () => void loadNotifications();
+    const refresh = (event?: Event) => {
+      const delta = event instanceof CustomEvent
+        ? (event.detail as { unreadCountDelta?: unknown } | undefined)?.unreadCountDelta
+        : undefined;
+      if (typeof delta === 'number' && Number.isFinite(delta)) {
+        setUnreadCount((currentCount) => Math.max(0, currentCount + delta));
+      }
+      void loadNotifications();
+    };
     window.addEventListener('taskora:notifications-updated', refresh);
     const interval = window.setInterval(refresh, 60000);
     return () => {
@@ -71,7 +90,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
     if (!item.read) {
       try {
         await notificationsApi.markRead(item.id);
-        window.dispatchEvent(new Event('taskora:notifications-updated'));
+        window.dispatchEvent(new CustomEvent('taskora:notifications-updated', {
+          detail: { unreadCountDelta: -1 },
+        }));
       } catch (cause) {
         setNotificationError(cause instanceof Error ? cause.message : 'Unable to mark this notification as read.');
       }
@@ -133,7 +154,10 @@ export const TopBar: React.FC<TopBarProps> = ({ onToggleMobileNav }) => {
           >
             <Bell className="w-4 h-4" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white dark:border-[#1E163B] shadow-sm animate-pulse-subtle">
+              <span
+                aria-label={`${unreadCount} unread notifications`}
+                className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white dark:border-[#1E163B] shadow-sm animate-pulse-subtle"
+              >
                 {unreadCount}
               </span>
             )}

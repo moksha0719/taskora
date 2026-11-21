@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock } from 'lucide-react';
 import { tasksApi, studyPlansApi, STUDY_PLANS_UPDATED_EVENT } from '../lib/api/client';
-import { ApiStudyPlan, Task } from '../types';
+import { ApiStudyPlan, StudyCompletion, Task } from '../types';
 import {
   addCalendarDays,
   getCalendarEvents,
@@ -25,6 +25,8 @@ export const CalendarPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [tasks, setTasks] = useState<Task[]>([]);
   const [studyPlans, setStudyPlans] = useState<ApiStudyPlan[]>([]);
+  const [completions, setCompletions] = useState<StudyCompletion[]>([]);
+  const [loadingCompletions, setLoadingCompletions] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -69,9 +71,47 @@ export const CalendarPage: React.FC = () => {
   }, [currentView, monthDates, selectedDate]);
   const firstVisibleDate = visibleDates[0];
   const lastVisibleDate = visibleDates[visibleDates.length - 1];
+
+  useEffect(() => {
+    let active = true;
+    if (studyPlans.length === 0) {
+      setCompletions([]);
+      setLoadingCompletions(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoadingCompletions(true);
+    const from = toDateKey(firstVisibleDate);
+    const to = toDateKey(addCalendarDays(lastVisibleDate, 1));
+    Promise.all(studyPlans.map((plan) => studyPlansApi.getCompletions(plan.id, from, to)))
+      .then((results) => {
+        if (active) setCompletions(results.flat());
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setLoadError(cause instanceof Error ? cause.message : 'Unable to load study completion data.');
+        }
+      })
+      .finally(() => {
+        if (active) setLoadingCompletions(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [firstVisibleDate, lastVisibleDate, studyPlans]);
+
   const events = useMemo(
-    () => getCalendarEvents(tasks, studyPlans, firstVisibleDate, addCalendarDays(lastVisibleDate, 1)),
-    [tasks, studyPlans, firstVisibleDate, lastVisibleDate]
+    () => getCalendarEvents(
+      tasks,
+      studyPlans,
+      firstVisibleDate,
+      addCalendarDays(lastVisibleDate, 1),
+      completions
+    ),
+    [tasks, studyPlans, firstVisibleDate, lastVisibleDate, completions]
   );
   const eventsByDate = useMemo(() => groupCalendarEvents(events), [events]);
   const studyTimeZoneSummary = useMemo(
@@ -260,7 +300,8 @@ export const CalendarPage: React.FC = () => {
                           'px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate',
                           calendarEvent.type === 'study'
                             ? 'bg-mint-accent text-mint-accent-text dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : 'bg-soft-pink text-soft-pink-text dark:bg-pink-950/60 dark:text-pink-300'
+                            : 'bg-soft-pink text-soft-pink-text dark:bg-pink-950/60 dark:text-pink-300',
+                          calendarEvent.completed && 'line-through opacity-70'
                         )}
                       >
                         {calendarEvent.time ? `${calendarEvent.time} ` : ''}
@@ -279,7 +320,7 @@ export const CalendarPage: React.FC = () => {
             })}
           </div>
 
-          {isLoading && <p className="text-xs text-muted-purple mt-4" role="status">Loading your tasks and study schedules...</p>}
+          {(isLoading || loadingCompletions) && <p className="text-xs text-muted-purple mt-4" role="status">Loading your tasks and study schedules...</p>}
           {loadError && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-500" role="alert">
               <span>{loadError}</span>
@@ -328,7 +369,11 @@ export const CalendarPage: React.FC = () => {
                     {calendarEvent.timeZone ? ` · ${calendarEvent.timeZone}` : ''}
                   </span>
                   <Badge variant={calendarEvent.type === 'study' ? 'mint' : 'pink'}>
-                    {calendarEvent.type === 'study' ? 'Study session' : 'Task'}
+                    {calendarEvent.isNextSession
+                      ? 'Next study session'
+                      : calendarEvent.completed
+                        ? 'Completed'
+                        : calendarEvent.type === 'study' ? 'Study session' : 'Task'}
                   </Badge>
                 </div>
                 <h5 className="text-xs font-bold text-deep-purple dark:text-white">

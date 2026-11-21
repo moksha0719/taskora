@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AIAssistantPage } from './AIAssistantPage';
 import { ThemeProvider } from '../context/ThemeContext';
@@ -52,7 +52,7 @@ describe('AI assistant conversation workflows', () => {
     vi.clearAllMocks();
   });
 
-  it('switches saved conversations, sends messages, and updates proposal decisions', async () => {
+  it('sends through the assistant endpoint while preserving conversation and proposal workflows', async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       if (url.pathname === '/api/ai/conversations' && (!init?.method || init.method === 'GET')) {
@@ -87,12 +87,10 @@ describe('AI assistant conversation workflows', () => {
           },
         });
       }
-      if (
-        url.pathname === `/api/ai/conversations/${secondConversation.id}/messages` &&
-        init?.method === 'POST'
-      ) {
+      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
         return jsonResponse({
-          userMessage: { id: 'saved-user-message' },
+          conversationId: secondConversation.id,
+          userMessage: { id: 'saved-user-message', content: 'Plan my revision' },
           assistantMessage: {
             id: 'assistant-message',
             content: 'I saved a response for you.',
@@ -162,7 +160,6 @@ describe('AI assistant conversation workflows', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Plan my revision' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('I saved a response for you.')).toBeInTheDocument();
-
     fireEvent.click(screen.getAllByRole('button', { name: 'Approve & Save Tasks' })[0]);
     expect(await screen.findByText('Approved & Saved')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Reject' })[0]);
@@ -173,11 +170,13 @@ describe('AI assistant conversation workflows', () => {
     )).toHaveLength(0);
 
     const sentCall = fetchMock.mock.calls.find(([input, init]) =>
-      new URL(String(input)).pathname === `/api/ai/conversations/${secondConversation.id}/messages` &&
-      init?.method === 'POST'
+      new URL(String(input)).pathname === '/api/ai/assistant' && init?.method === 'POST'
     );
     expect(sentCall).toBeDefined();
-    expect(JSON.parse(String(sentCall?.[1]?.body))).toEqual({ message: 'Plan my revision' });
+    expect(JSON.parse(String(sentCall?.[1]?.body))).toEqual({
+      message: 'Plan my revision',
+      conversationId: secondConversation.id,
+    });
     expect(sessionStorage.getItem('taskora_ai_conversation_id')).toBe(secondConversation.id);
 
     fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
@@ -200,10 +199,7 @@ describe('AI assistant conversation workflows', () => {
       if (url.pathname === '/api/ai/conversations' && (!init?.method || init.method === 'GET')) {
         return jsonResponse({ conversations: [firstConversation] });
       }
-      if (
-        url.pathname === `/api/ai/conversations/${firstConversation.id}/messages` &&
-        init?.method === 'POST'
-      ) {
+      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
         return jsonResponse({ error: 'AI service is not configured' }, 503);
       }
       throw new Error(`Unexpected API request: ${init?.method || 'GET'} ${url.pathname}`);
@@ -214,9 +210,78 @@ describe('AI assistant conversation workflows', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Help me plan' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('AI service is not configured');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The AI provider is unavailable (503). Please try again later.'
+    );
     expect(screen.getByRole('textbox')).toHaveValue('Help me plan');
     expect(screen.queryByText('Help me plan')).not.toBeInTheDocument();
+  });
+
+  it('shows a loading indicator until the assistant endpoint responds', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}`) {
+        return jsonResponse({ conversation: { messages: [], proposals: [] } });
+      }
+      if (url.pathname === '/api/ai/conversations') {
+        return jsonResponse({ conversations: [firstConversation] });
+      }
+      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        });
+      }
+      throw new Error(`Unexpected API request: ${init?.method || 'GET'} ${url.pathname}`);
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Help me focus' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Taskora AI is preparing a response...'
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    await act(async () => {
+      resolveResponse?.(jsonResponse({
+        conversationId: firstConversation.id,
+        assistantMessage: {
+          id: 'assistant-message',
+          content: 'Try one small step at a time.',
+          createdAt: '2026-11-20T09:01:00.000Z',
+        },
+        proposals: [],
+      }, 201));
+    });
+    expect(await screen.findByText('Try one small step at a time.')).toBeInTheDocument();
+  });
+
+  it('shows a clear timeout message when the AI provider returns 504', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}`) {
+        return jsonResponse({ conversation: { messages: [], proposals: [] } });
+      }
+      if (url.pathname === '/api/ai/conversations') {
+        return jsonResponse({ conversations: [firstConversation] });
+      }
+      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
+        return jsonResponse({ error: 'AI response timed out' }, 504);
+      }
+      throw new Error(`Unexpected API request: ${init?.method || 'GET'} ${url.pathname}`);
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Help me focus' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The AI provider timed out (504). Please try again.'
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('Help me focus');
   });
 
   it('keeps the previous conversation selected when loading another one fails', async () => {

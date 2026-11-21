@@ -141,3 +141,130 @@ test("study room lifecycle restricts management to owners and persists shared ti
     });
     assert.equal(ownerDelete.status, 204);
 });
+
+test("study room joins enforce capacity, duplicate joins stay idempotent, and leaving updates the list", async (t) => {
+    process.env.JWT_SECRET = "taskora-study-room-test-secret-at-least-32";
+    const ownerId = "11111111-1111-4111-8111-111111111111";
+    const memberId = "22222222-2222-4222-8222-222222222222";
+    const visitorId = "33333333-3333-4333-8333-333333333333";
+    const room = {
+        id: "44444444-4444-4444-8444-444444444444",
+        ownerId,
+        name: "Capacity room",
+        topic: "Revision",
+        isPrivate: false,
+        maxParticipants: 2,
+        passcodeHash: null
+    };
+    const participants = [
+        { id: "participant-owner", roomId: room.id, userId: ownerId, status: "focusing" },
+        { id: "participant-member", roomId: room.id, userId: memberId, status: "idle" }
+    ];
+    const findParticipant = ({ where }) => participants.find((participant) =>
+        participant.roomId === where.roomId_userId.roomId &&
+        participant.userId === where.roomId_userId.userId
+    ) || null;
+    const tx = {
+        studyRoom: {
+            findUnique: async ({ where }) => where.id === room.id ? { ...room } : null
+        },
+        roomParticipant: {
+            findUnique: async (args) => findParticipant(args),
+            count: async ({ where }) => participants.filter((participant) =>
+                participant.roomId === where.roomId
+            ).length,
+            upsert: async ({ where, create, update }) => {
+                const existing = findParticipant({ where });
+                if (existing) {
+                    Object.assign(existing, update);
+                    return existing;
+                }
+                const participant = { id: `participant-${create.userId}`, ...create };
+                participants.push(participant);
+                return participant;
+            }
+        }
+    };
+    const prisma = {
+        studyRoom: {
+            findUnique: tx.studyRoom.findUnique,
+            findMany: async (args) => {
+                assert.deepEqual(args.include.participants.include.user.select, {
+                    id: true,
+                    name: true,
+                    avatar: true
+                });
+                return [{
+                    ...room,
+                    participants: participants.map((participant) => ({
+                        ...participant,
+                        joinedAt: new Date("2026-11-20T08:00:00.000Z"),
+                        user: {
+                            id: participant.userId,
+                            name: participant.userId === ownerId ? "Owner" : "Member",
+                            avatar: null,
+                            email: "private@example.invalid",
+                            password: "test-only-hash"
+                        }
+                    })),
+                    messages: []
+                }];
+            }
+        },
+        roomParticipant: {
+            deleteMany: async ({ where }) => {
+                const index = participants.findIndex((participant) =>
+                    participant.roomId === where.roomId && participant.userId === where.userId
+                );
+                if (index < 0) return { count: 0 };
+                participants.splice(index, 1);
+                return { count: 1 };
+            }
+        },
+        $transaction: async (callback) => callback(tx)
+    };
+    const server = await listen(prisma, { value: new Date("2026-11-20T08:00:00.000Z") });
+    t.after(() => server.server.close());
+
+    const duplicateJoin = await fetch(`${server.baseUrl}/api/study-rooms/${room.id}/join`, {
+        method: "POST",
+        headers: { ...authHeader(memberId), "Content-Type": "application/json" },
+        body: JSON.stringify({})
+    });
+    assert.equal(duplicateJoin.status, 200);
+    assert.equal(participants.length, 2);
+
+    const fullRoomJoin = await fetch(`${server.baseUrl}/api/study-rooms/${room.id}/join`, {
+        method: "POST",
+        headers: { ...authHeader(visitorId), "Content-Type": "application/json" },
+        body: JSON.stringify({})
+    });
+    assert.equal(fullRoomJoin.status, 409);
+    assert.deepEqual(await fullRoomJoin.json(), { error: "Study room is full" });
+    assert.equal(participants.length, 2);
+
+    const leave = await fetch(`${server.baseUrl}/api/study-rooms/${room.id}/participants/me`, {
+        method: "DELETE",
+        headers: authHeader(memberId)
+    });
+    assert.equal(leave.status, 204);
+    assert.equal(participants.length, 1);
+
+    const refreshedRooms = await fetch(`${server.baseUrl}/api/study-rooms`, {
+        headers: authHeader(memberId)
+    });
+    assert.equal(refreshedRooms.status, 200);
+    const listedRoom = (await refreshedRooms.json()).rooms[0];
+    assert.equal(listedRoom.participants.length, 1);
+    assert.equal(listedRoom.participants[0].user.name, "Owner");
+    assert.equal(Object.hasOwn(listedRoom.participants[0].user, "email"), false);
+    assert.equal(Object.hasOwn(listedRoom.participants[0].user, "password"), false);
+
+    const joinAfterLeave = await fetch(`${server.baseUrl}/api/study-rooms/${room.id}/join`, {
+        method: "POST",
+        headers: { ...authHeader(visitorId), "Content-Type": "application/json" },
+        body: JSON.stringify({})
+    });
+    assert.equal(joinAfterLeave.status, 200);
+    assert.equal(participants.length, 2);
+});

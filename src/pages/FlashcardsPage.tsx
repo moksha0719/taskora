@@ -195,7 +195,11 @@ export const FlashcardsPage: React.FC = () => {
         cards: previous.cards?.map((item) => item.id === updated.id ? updated : item),
       }));
       setShowAnswer(false);
-      if (dueCards.length <= 1) setNotice('Review session complete.');
+      const nextReviewDate = new Date(updated.dueAt).toLocaleDateString();
+      const interval = `${updated.intervalDays} day${updated.intervalDays === 1 ? '' : 's'}`;
+      setNotice(
+        `Next review date: ${nextReviewDate} · Interval: ${interval}.${dueCards.length <= 1 ? ' Review session complete.' : ''}`
+      );
     });
   };
 
@@ -416,8 +420,9 @@ export const FlashcardsPage: React.FC = () => {
                           <p className="mt-3 flex items-center gap-1 text-[11px] text-muted-purple">
                             <RotateCcw className="h-3 w-3" />
                             {new Date(card.dueAt).getTime() <= Date.now()
-                              ? 'Due now'
-                              : `Due ${new Date(card.dueAt).toLocaleDateString()}`}
+                              ? 'Next review: Due now'
+                              : `Next review: ${new Date(card.dueAt).toLocaleDateString()}`}
+                            <span className="ml-2">Interval: {card.intervalDays} day{card.intervalDays === 1 ? '' : 's'}</span>
                           </p>
                         </Card>
                       ))}

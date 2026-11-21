@@ -3,7 +3,7 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { ProposalCard } from '../components/ai/ProposalCard';
 import { MascotBunny } from '../components/common/MascotBunny';
-import { aiApi } from '../lib/api/client';
+import { aiApi, ApiError } from '../lib/api/client';
 import type { AIConversationSummary } from '../lib/api/client';
 import type { ChatMessage } from '../types';
 import { Bot, Send, Sparkles, User, Plus } from 'lucide-react';
@@ -106,7 +106,7 @@ export const AIAssistantPage: React.FC = () => {
     setError(null);
 
     try {
-      const result = await aiApi.generateProposal(prompt);
+      const result = await aiApi.generateAssistantResponse(prompt);
       setActiveConversationId(aiApi.getActiveConversationId());
       const assistantMsg: ChatMessage = {
         id: result.assistantMessageId,
@@ -134,7 +134,13 @@ export const AIAssistantPage: React.FC = () => {
     } catch (cause: unknown) {
       setMessages((prev) => prev.filter((message) => message.id !== userMsg.id));
       setInputPrompt(prompt);
-      setError(cause instanceof Error ? cause.message : 'Unable to send your message.');
+      if (cause instanceof ApiError && cause.status === 503) {
+        setError('The AI provider is unavailable (503). Please try again later.');
+      } else if (cause instanceof ApiError && cause.status === 504) {
+        setError('The AI provider timed out (504). Please try again.');
+      } else {
+        setError(cause instanceof Error ? cause.message : 'Unable to send your message.');
+      }
     } finally {
       sendingRef.current = false;
       setLoading(false);
@@ -308,7 +314,7 @@ export const AIAssistantPage: React.FC = () => {
             <div className="w-8 h-8 rounded-2xl bg-primary-subtle flex items-center justify-center text-primary">
               <Bot className="w-4 h-4 animate-spin" />
             </div>
-            <span>Taskora AI is formulating structured proposals...</span>
+            <span role="status" aria-live="polite">Taskora AI is preparing a response...</span>
           </div>
         )}
       </Card>

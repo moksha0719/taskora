@@ -305,3 +305,59 @@ test("scheduler start is idempotent and stop waits for an active run", async () 
     await stopPromise;
     assert.equal(taskQueries, 1);
 });
+
+test("scheduler logs Prisma code and metadata and continues after a failed run", async () => {
+    let intervalCallback;
+    let shouldFail = true;
+    let taskQueries = 0;
+    const loggedErrors = [];
+    const originalConsoleError = console.error;
+    console.error = (...args) => loggedErrors.push(args);
+    const prismaClient = {
+        task: {
+            findMany: async () => {
+                taskQueries += 1;
+                if (shouldFail) {
+                    const error = new Error("database details");
+                    error.name = "PrismaClientKnownRequestError";
+                    error.code = "P2002";
+                    error.meta = { target: ["dedupeKey"] };
+                    throw error;
+                }
+                return [];
+            }
+        },
+        scheduleItem: { findMany: async () => [] }
+    };
+    const scheduler = createNotificationScheduler({
+        prismaClient,
+        notificationService: { createNotification: async () => 1 },
+        setIntervalFunction: (callback) => {
+            intervalCallback = callback;
+            return { unref() {} };
+        },
+        clearIntervalFunction: () => {}
+    });
+
+    try {
+        scheduler.start();
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(loggedErrors, [[
+            "Notification scheduler run failed:",
+            {
+                name: "PrismaClientKnownRequestError",
+                code: "P2002",
+                meta: { target: ["dedupeKey"] }
+            }
+        ]]);
+
+        shouldFail = false;
+        intervalCallback();
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(taskQueries, 2);
+        assert.equal(loggedErrors.length, 1);
+    } finally {
+        await scheduler.stop();
+        console.error = originalConsoleError;
+    }
+});

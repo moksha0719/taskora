@@ -40,6 +40,7 @@ test("product routes enforce authentication and persist owner-scoped habits and 
     const storedNotes = new Map();
     const storedFocusSessions = [];
     const focusXpTransactions = [];
+    const focusSessionAggregates = [];
     const clock = { value: new Date("2026-11-20T08:00:00.000Z") };
     const focusSessionModel = {
         findUnique: async (args) => {
@@ -60,6 +61,14 @@ test("product routes enforce authentication and persist owner-scoped habits and 
             return latest
                 ? Object.fromEntries(Object.keys(args.select).map((field) => [field, latest[field]]))
                 : null;
+        },
+        aggregate: async (args) => {
+            focusSessionAggregates.push(args);
+            return {
+                _sum: {
+                    durationMinutes: focusSessionAggregates.length === 1 ? 45 : null
+                }
+            };
         },
         create: async (args) => {
             const session = {
@@ -125,6 +134,11 @@ test("product routes enforce authentication and persist owner-scoped habits and 
         focusSession: focusSessionModel,
         studyRoom: {
             findMany: async (args) => {
+                assert.deepEqual(args.include.participants.include.user.select, {
+                    id: true,
+                    name: true,
+                    avatar: true
+                });
                 assert.deepEqual(args.include.messages.include.user.select, {
                     id: true,
                     name: true,
@@ -138,8 +152,18 @@ test("product routes enforce authentication and persist owner-scoped habits and 
                     isPrivate: true,
                     passcodeHash: "test-only-hash",
                     participants: [{
+                        id: "participant-id",
                         userId,
-                        user: { id: userId, name: "Study owner", avatar: null }
+                        status: "focusing",
+                        joinedAt: new Date("2026-11-20T08:00:00.000Z"),
+                        email: "private-participant@example.invalid",
+                        user: {
+                            id: userId,
+                            name: "Study owner",
+                            avatar: null,
+                            email: "private-user@example.invalid",
+                            password: "test-only-password-hash"
+                        }
                     }],
                     messages: [{
                         id: "55555555-5555-4555-8555-555555555555",
@@ -195,6 +219,47 @@ test("product routes enforce authentication and persist owner-scoped habits and 
     });
     assert.equal(habits.status, 200);
     assert.deepEqual((await habits.json()).habits, []);
+
+    const unauthenticatedTodayFocus = await fetch(`${started.baseUrl}/api/focus-sessions/today`);
+    assert.equal(unauthenticatedTodayFocus.status, 401);
+
+    const todayFocus = await fetch(
+        `${started.baseUrl}/api/focus-sessions/today?timeZone=Asia%2FColombo`,
+        { headers: { authorization: `Bearer ${token}` } }
+    );
+    assert.equal(todayFocus.status, 200);
+    assert.deepEqual(await todayFocus.json(), {
+        date: "2026-11-20",
+        timeZone: "Asia/Colombo",
+        totalFocusMinutes: 45
+    });
+    assert.deepEqual(focusSessionAggregates[0].where, {
+        userId,
+        completedAt: {
+            gte: new Date("2026-11-19T18:30:00.000Z"),
+            lt: new Date("2026-11-20T18:30:00.000Z")
+        }
+    });
+
+    const todayFocusUtc = await fetch(`${started.baseUrl}/api/focus-sessions/today`, {
+        headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(todayFocusUtc.status, 200);
+    assert.deepEqual(await todayFocusUtc.json(), {
+        date: "2026-11-20",
+        timeZone: "UTC",
+        totalFocusMinutes: 0
+    });
+    assert.deepEqual(focusSessionAggregates[1].where.completedAt, {
+        gte: new Date("2026-11-20T00:00:00.000Z"),
+        lt: new Date("2026-11-21T00:00:00.000Z")
+    });
+
+    const invalidTimeZone = await fetch(
+        `${started.baseUrl}/api/focus-sessions/today?timeZone=Mars%2FOlympus`,
+        { headers: { authorization: `Bearer ${token}` } }
+    );
+    assert.equal(invalidTimeZone.status, 400);
 
     const createdHabit = await fetch(`${started.baseUrl}/api/habits`, {
         method: "POST",
@@ -271,6 +336,10 @@ test("product routes enforce authentication and persist owner-scoped habits and 
     assert.equal(listedRoom.isPrivate, true);
     assert.equal(Object.hasOwn(listedRoom, "passcodeHash"), false);
     assert.equal(listedRoom.participants[0].user.name, "Study owner");
+    assert.deepEqual(Object.keys(listedRoom.participants[0].user).sort(), ["avatar", "id", "name"]);
+    assert.equal(Object.hasOwn(listedRoom.participants[0], "email"), false);
+    assert.equal(Object.hasOwn(listedRoom.participants[0].user, "email"), false);
+    assert.equal(Object.hasOwn(listedRoom.participants[0].user, "password"), false);
     assert.equal(listedRoom.messages[0].user.name, "Study owner");
 
     const focusStartResponse = await fetch(`${started.baseUrl}/api/focus/sessions/start`, {
@@ -311,7 +380,7 @@ test("product routes enforce authentication and persist owner-scoped habits and 
     assert.equal(tamperedFocusCompletion.status, 400);
 
     clock.value = new Date(clock.value.getTime() + 60_000);
-    const focusCompletion = await fetch(`${started.baseUrl}/api/focus/sessions`, {
+    const focusCompletion = await fetch(`${started.baseUrl}/api/focus-sessions`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ sessionToken: focusToken })
@@ -324,13 +393,24 @@ test("product routes enforce authentication and persist owner-scoped habits and 
     assert.equal(storedFocusSessions.length, 1);
     assert.equal(focusXpTransactions.length, 1);
 
-    const replayedFocusCompletion = await fetch(`${started.baseUrl}/api/focus/sessions`, {
+    const replayedFocusCompletion = await fetch(`${started.baseUrl}/api/focus-sessions`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ sessionToken: focusToken })
     });
     assert.equal(replayedFocusCompletion.status, 200);
     assert.equal((await replayedFocusCompletion.json()).session.id, completedFocus.id);
+    assert.equal(storedFocusSessions.length, 1);
+    assert.equal(focusXpTransactions.length, 1);
+
+    const replayedLegacyCompletion = await fetch(`${started.baseUrl}/api/focus/sessions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ sessionToken: focusToken })
+    });
+    assert.equal(replayedLegacyCompletion.status, 200);
+    assert.equal((await replayedLegacyCompletion.json()).session.id, completedFocus.id);
+    assert.equal(focusXpTransactions.length, 1);
 
     const overlappingFocusCompletion = await fetch(`${started.baseUrl}/api/focus/sessions`, {
         method: "POST",
@@ -389,4 +469,77 @@ test("product routes enforce authentication and persist owner-scoped habits and 
         headers: { authorization: `Bearer ${token}` }
     });
     assert.equal(unauthorizedAdminReports.status, 403);
+});
+
+test("product routes reject malformed resource IDs and invalid query/body shapes", async (t) => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    process.env.JWT_SECRET = "taskora-product-validation-test-secret-at-least-32";
+    const token = jwt.sign({}, process.env.JWT_SECRET, {
+        algorithm: "HS256",
+        audience: JWT_AUDIENCE,
+        issuer: JWT_ISSUER,
+        subject: userId,
+        expiresIn: "1h"
+    });
+    const unexpectedModel = new Proxy({}, {
+        get: () => async () => {
+            throw new Error("Malformed input reached a Prisma model");
+        }
+    });
+    const prisma = new Proxy({
+        user: { findUnique: async () => ({ role: "ADMIN" }) }
+    }, {
+        get: (target, property) => Object.hasOwn(target, property)
+            ? target[property]
+            : unexpectedModel
+    });
+    const started = await listen(prisma);
+    t.after(() => started.server.close());
+
+    const malformedIdRequests = [
+        ["PUT", "/api/habits/not-a-uuid/check-ins", { date: "2026-01-01", checked: true }],
+        ["DELETE", "/api/habits/not-a-uuid"],
+        ["PUT", "/api/notes/not-a-uuid", { title: "Updated" }],
+        ["DELETE", "/api/notes/not-a-uuid"],
+        ["POST", "/api/study-rooms/not-a-uuid/join", {}],
+        ["PATCH", "/api/study-rooms/not-a-uuid", { name: "Updated" }],
+        ["DELETE", "/api/study-rooms/not-a-uuid"],
+        ["DELETE", "/api/study-rooms/not-a-uuid/participants/me"],
+        ["PATCH", "/api/study-rooms/not-a-uuid/timer", { action: "reset" }],
+        ["POST", "/api/study-rooms/not-a-uuid/messages", { content: "Hello" }],
+        ["GET", "/api/study-rooms/not-a-uuid/events"]
+    ];
+    for (const [method, path, body] of malformedIdRequests) {
+        const response = await fetch(`${started.baseUrl}${path}`, {
+            method,
+            headers: {
+                authorization: `Bearer ${token}`,
+                ...(body ? { "content-type": "application/json" } : {})
+            },
+            ...(body ? { body: JSON.stringify(body) } : {})
+        });
+        assert.equal(response.status, 400, `${method} ${path} should reject malformed IDs`);
+    }
+
+    const invalidRequestShapes = [
+        ["POST", "/api/reports"],
+        ["PATCH", "/api/admin/reports/22222222-2222-4222-8222-222222222222"],
+        ["GET", "/api/analytics?period=7d&period=30d"],
+        ["GET", "/api/search?q=first&q=second"],
+        ["GET", "/api/focus-sessions/today?unknown=value"]
+    ];
+    for (const [method, path] of invalidRequestShapes) {
+        const response = await fetch(`${started.baseUrl}${path}`, {
+            method,
+            headers: { authorization: `Bearer ${token}` }
+        });
+        assert.equal(response.status, 400, `${method} ${path} should reject invalid input`);
+    }
+
+    const invalidPasscode = await fetch(`${started.baseUrl}/api/study-rooms/22222222-2222-4222-8222-222222222222/join`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ passcode: "x".repeat(65) })
+    });
+    assert.equal(invalidPasscode.status, 400);
 });

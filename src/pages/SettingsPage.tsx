@@ -7,6 +7,36 @@ import { User, Lock, Bell, Download, Trash2, CheckCircle2, Save, Camera } from '
 
 const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const PROFILE_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const SETTINGS_PREFERENCES_PREFIX = 'taskora.settings.preferences';
+
+interface SettingsPreferences {
+  profileVisible: boolean;
+  emailAlerts: boolean;
+}
+
+const DEFAULT_SETTINGS_PREFERENCES: SettingsPreferences = {
+  profileVisible: true,
+  emailAlerts: true,
+};
+
+function getSettingsPreferencesKey(userId: string): string {
+  return `${SETTINGS_PREFERENCES_PREFIX}:${userId}`;
+}
+
+function parseSettingsPreferences(serialized: string): SettingsPreferences {
+  const parsed: unknown = JSON.parse(serialized);
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !('profileVisible' in parsed) ||
+    typeof parsed.profileVisible !== 'boolean' ||
+    !('emailAlerts' in parsed) ||
+    typeof parsed.emailAlerts !== 'boolean'
+  ) {
+    throw new Error('Saved settings preferences are invalid.');
+  }
+  return { profileVisible: parsed.profileVisible, emailAlerts: parsed.emailAlerts };
+}
 
 export const SettingsPage: React.FC = () => {
   const { user, updateProfile, uploadProfilePhoto, changePassword, deleteAccount } = useAuth();
@@ -32,15 +62,18 @@ export const SettingsPage: React.FC = () => {
   const [name, setName] = useState(user?.name || '');
   const [bio, setBio] = useState(user?.bio || '');
   const [major, setMajor] = useState(user?.major || '');
-  const [email, setEmail] = useState(user?.email || '');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
 
-  // Privacy toggles
-  const [profileVisible, setProfileVisible] = useState(true);
+  const [preferences, setPreferences] = useState<SettingsPreferences>(DEFAULT_SETTINGS_PREFERENCES);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const [preferencesStatus, setPreferencesStatus] = useState<string | null>(null);
   const [roomPresenceVisible, setRoomPresenceVisible] = useState(true);
   const [privateByDefault, setPrivateByDefault] = useState(true);
 
   // Notifications
-  const [emailAlerts, setEmailAlerts] = useState(true);
   const [soundEffects, setSoundEffects] = useState(true);
   const [habitPrompts, setHabitPrompts] = useState(true);
 
@@ -52,10 +85,59 @@ export const SettingsPage: React.FC = () => {
   // Delete modal
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
+  useEffect(() => {
+    setPreferencesLoading(true);
+    setPreferencesError(null);
+    setPreferencesStatus(null);
+    if (!user?.id) {
+      setPreferences(DEFAULT_SETTINGS_PREFERENCES);
+      setPreferencesLoading(false);
+      return;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(getSettingsPreferencesKey(user.id));
+      setPreferences(saved ? parseSettingsPreferences(saved) : DEFAULT_SETTINGS_PREFERENCES);
+    } catch {
+      setPreferences(DEFAULT_SETTINGS_PREFERENCES);
+      setPreferencesError('Unable to load saved preferences from this browser.');
+    } finally {
+      setPreferencesLoading(false);
+    }
+  }, [user?.id]);
+
+  const handlePreferenceChange = (key: keyof SettingsPreferences, value: boolean) => {
+    if (!user?.id) {
+      setPreferencesError('Your account is not available to save this setting.');
+      setPreferencesStatus(null);
+      return;
+    }
+
+    const updated = { ...preferences, [key]: value };
+    setPreferencesError(null);
+    setPreferencesStatus(null);
+    try {
+      window.localStorage.setItem(getSettingsPreferencesKey(user.id), JSON.stringify(updated));
+      setPreferences(updated);
+      setPreferencesStatus('Settings saved in this browser.');
+    } catch {
+      setPreferencesError('Unable to save this setting in your browser. Check storage availability and try again.');
+    }
+  };
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateProfile({ name, bio, major, email });
-    alert('Profile settings updated successfully!');
+    setProfileSaving(true);
+    setProfileError(null);
+    setProfileSuccess(null);
+    try {
+      await updateProfile({ name, bio, major });
+      setProfileSuccess('Profile settings updated successfully.');
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Unable to update your profile.');
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   const handlePhotoSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,6 +221,8 @@ export const SettingsPage: React.FC = () => {
         </h3>
 
         <form onSubmit={handleSaveProfile} className="space-y-4">
+          {profileError && <p role="alert" className="text-xs text-rose-600">{profileError}</p>}
+          {profileSuccess && <p role="status" className="text-xs text-emerald-600">{profileSuccess}</p>}
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
             <img
               src={photoPreview || user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80'}
@@ -147,7 +231,7 @@ export const SettingsPage: React.FC = () => {
             />
             <div className="min-w-0">
               <h4 className="text-sm font-bold text-deep-purple dark:text-white">{name}</h4>
-              <p className="text-xs text-muted-purple">{email}</p>
+              <p className="text-xs text-muted-purple">{user?.email || ''}</p>
               <input
                 ref={photoInputRef}
                 type="file"
@@ -237,9 +321,9 @@ export const SettingsPage: React.FC = () => {
           </div>
 
           <div className="flex justify-end pt-2">
-            <Button type="submit" size="sm" pill>
+            <Button type="submit" size="sm" pill disabled={profileSaving}>
               <Save className="w-3.5 h-3.5 mr-1" />
-              <span>Save Profile</span>
+              <span>{profileSaving ? 'Saving...' : 'Save Profile'}</span>
             </Button>
           </div>
         </form>
@@ -248,6 +332,25 @@ export const SettingsPage: React.FC = () => {
       {/* Privacy Settings */}
       <Card className="p-6">
         <div className="space-y-3 text-xs">
+          <label className="flex items-center justify-between p-3 rounded-2xl bg-primary-subtle/20 dark:bg-primary/5 cursor-pointer">
+            <div>
+              <span className="font-bold text-deep-purple dark:text-white block">
+                Profile Visible to Others
+              </span>
+              <span className="text-muted-purple text-[11px]">
+                Remember this preference in this browser.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={preferences.profileVisible}
+              disabled={preferencesLoading || !user?.id}
+              onChange={(e) => handlePreferenceChange('profileVisible', e.target.checked)}
+              className="w-4 h-4 rounded text-primary focus:ring-primary/40 cursor-pointer"
+            />
+          </label>
+          {preferencesError && <p role="alert" className="text-xs text-rose-600">{preferencesError}</p>}
+          {preferencesStatus && <p role="status" className="text-xs text-emerald-600">{preferencesStatus}</p>}
           <label className="flex items-center justify-between p-3 rounded-2xl bg-primary-subtle/20 dark:bg-primary/5 cursor-pointer">
             <div>
               <span className="font-bold text-deep-purple dark:text-white block">
@@ -292,6 +395,23 @@ export const SettingsPage: React.FC = () => {
         </h3>
 
         <div className="space-y-3 text-xs">
+          <label className="flex items-center justify-between p-3 rounded-2xl bg-primary-subtle/20 dark:bg-primary/5 cursor-pointer">
+            <div>
+              <span className="font-bold text-deep-purple dark:text-white block">
+                Email Alerts
+              </span>
+              <span className="text-muted-purple text-[11px]">
+                Remember this preference in this browser.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={preferences.emailAlerts}
+              disabled={preferencesLoading || !user?.id}
+              onChange={(e) => handlePreferenceChange('emailAlerts', e.target.checked)}
+              className="w-4 h-4 rounded text-primary focus:ring-primary/40 cursor-pointer"
+            />
+          </label>
           <label className="flex items-center justify-between p-3 rounded-2xl bg-primary-subtle/20 dark:bg-primary/5 cursor-pointer">
             <div>
               <span className="font-bold text-deep-purple dark:text-white block">
@@ -436,11 +556,11 @@ export const SettingsPage: React.FC = () => {
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}
         title="Delete Account?"
-        description="This action is permanent and will delete all study plans, notes, and XP records."
+        description="All your tasks and related data—including study plans, notes, focus sessions, habits, notifications, and progress—will be permanently deleted."
       >
         <div className="space-y-4 pt-2 text-xs text-muted-purple">
           <p className="p-3 rounded-2xl bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300 border border-rose-200">
-            ⚠️ Warning: Your data cannot be recovered after deletion.
+            Warning: This cannot be undone. Your data cannot be recovered after deletion.
           </p>
           <div className="flex justify-end gap-2 pt-3 border-t border-subtle">
             <Button

@@ -25,6 +25,13 @@ const CARD_SELECT = {
     createdAt: true,
     updatedAt: true
 };
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireUuidParam(req, res, parameter, label) {
+    if (UUID_PATTERN.test(req.params[parameter])) return true;
+    res.status(400).json({ error: `Invalid ${label} ID` });
+    return false;
+}
 
 function isObjectBody(body) {
     return body !== null && typeof body === "object" && !Array.isArray(body);
@@ -138,6 +145,7 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.get("/decks/:deckId", async (req, res, next) => {
+        if (!requireUuidParam(req, res, "deckId", "Flashcard deck")) return;
         try {
             const deck = await prisma.flashcardDeck.findFirst({
                 where: { id: req.params.deckId, userId: req.user.id },
@@ -155,6 +163,7 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.patch("/decks/:deckId", async (req, res, next) => {
+        if (!requireUuidParam(req, res, "deckId", "Flashcard deck")) return;
         const data = validateDeckBody(req.body, true);
         if (!data) return res.status(400).json({ error: "Deck fields are invalid" });
         try {
@@ -174,6 +183,7 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.delete("/decks/:deckId", async (req, res, next) => {
+        if (!requireUuidParam(req, res, "deckId", "Flashcard deck")) return;
         try {
             const result = await prisma.flashcardDeck.deleteMany({
                 where: { id: req.params.deckId, userId: req.user.id }
@@ -186,6 +196,7 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.post("/decks/:deckId/cards", async (req, res, next) => {
+        if (!requireUuidParam(req, res, "deckId", "Flashcard deck")) return;
         const data = validateCardBody(req.body);
         if (!data) return res.status(400).json({ error: "Card front and back are invalid" });
         try {
@@ -206,6 +217,7 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.patch("/cards/:cardId", async (req, res, next) => {
+        if (!requireUuidParam(req, res, "cardId", "Flashcard")) return;
         const data = validateCardBody(req.body, true);
         if (!data) return res.status(400).json({ error: "Card fields are invalid" });
         try {
@@ -226,6 +238,7 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
     });
 
     router.delete("/cards/:cardId", async (req, res, next) => {
+        if (!requireUuidParam(req, res, "cardId", "Flashcard")) return;
         try {
             const existing = await prisma.flashcard.findFirst({
                 where: { id: req.params.cardId, deck: { userId: req.user.id } },
@@ -239,7 +252,8 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
         }
     });
 
-    router.post("/cards/:cardId/review", async (req, res, next) => {
+    const reviewCard = async (req, res, next) => {
+        if (!requireUuidParam(req, res, "cardId", "Flashcard")) return;
         if (!isObjectBody(req.body) ||
             Object.keys(req.body).length !== 1 ||
             !Number.isInteger(req.body.quality) ||
@@ -262,7 +276,10 @@ function createFlashcardRouter(prisma, { now = () => new Date() } = {}) {
         } catch (error) {
             next(error);
         }
-    });
+    };
+
+    router.post("/cards/:cardId/review", reviewCard);
+    router.post("/:cardId/review", reviewCard);
 
     return router;
 }

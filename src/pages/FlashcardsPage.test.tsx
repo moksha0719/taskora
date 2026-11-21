@@ -51,6 +51,7 @@ describe('FlashcardsPage', () => {
   });
 
   it('reviews a due card and updates to the empty due state', async () => {
+    const nextReviewDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     vi.mocked(flashcardsApi.getDecks).mockResolvedValue([deck]);
     vi.mocked(flashcardsApi.getDeck).mockResolvedValue(deck);
     vi.mocked(flashcardsApi.reviewCard).mockResolvedValue({
@@ -58,7 +59,7 @@ describe('FlashcardsPage', () => {
       repetitions: 1,
       intervalDays: 1,
       reviewCount: 1,
-      dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      dueAt: nextReviewDate,
       lastReviewedAt: new Date().toISOString(),
     });
     render(<FlashcardsPage />);
@@ -70,7 +71,37 @@ describe('FlashcardsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Good' }));
 
     expect(await screen.findByText('All due cards reviewed')).toBeInTheDocument();
+    expect(await screen.findByText(
+      `Next review date: ${new Date(nextReviewDate).toLocaleDateString()} · Interval: 1 day. Review session complete.`
+    )).toBeInTheDocument();
     expect(flashcardsApi.reviewCard).toHaveBeenCalledWith('card-1', 4);
+  });
+
+  it('creates a card through the API and adds the returned card to the deck', async () => {
+    const createdCard: Flashcard = {
+      ...card,
+      id: 'card-2',
+      front: 'What is a thread?',
+      back: 'A unit of execution.',
+      position: 1,
+      intervalDays: 0,
+    };
+    vi.mocked(flashcardsApi.getDecks).mockResolvedValue([deck]);
+    vi.mocked(flashcardsApi.getDeck).mockResolvedValue(deck);
+    vi.mocked(flashcardsApi.createCard).mockResolvedValue(createdCard);
+
+    render(<FlashcardsPage />);
+    expect(await screen.findByText('What is a process?')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Front'), { target: { value: createdCard.front } });
+    fireEvent.change(screen.getByLabelText('Back'), { target: { value: createdCard.back } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add card' }));
+
+    await waitFor(() => expect(flashcardsApi.createCard).toHaveBeenCalledWith('deck-1', {
+      front: createdCard.front,
+      back: createdCard.back,
+    }));
+    expect(await screen.findByText('What is a thread?')).toBeInTheDocument();
+    expect(screen.getByText('Card added.')).toBeInTheDocument();
   });
 
   it('shows the empty state and creates a user deck through the API', async () => {

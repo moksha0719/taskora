@@ -45,6 +45,8 @@ export const DashboardPage: React.FC = () => {
   );
   const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [createTaskError, setCreateTaskError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -88,21 +90,29 @@ export const DashboardPage: React.FC = () => {
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!taskTitle.trim()) return;
+    if (!taskTitle.trim() || isCreatingTask) return;
 
-    await tasksApi.createTask({
-      title: taskTitle.trim(),
-      category: taskCategory,
-      priority: taskPriority,
-      status: 'todo',
-      dueDate: taskDueDate,
-      tags: [taskCategory],
-      subtasks: [],
-    });
+    setIsCreatingTask(true);
+    setCreateTaskError(null);
+    try {
+      await tasksApi.createTask({
+        title: taskTitle.trim(),
+        category: taskCategory,
+        priority: taskPriority,
+        status: 'todo',
+        dueDate: taskDueDate,
+        tags: [taskCategory],
+        subtasks: [],
+      });
 
-    setTaskTitle('');
-    setIsCreateTaskModalOpen(false);
-    await loadDashboardMetrics();
+      setTaskTitle('');
+      setIsCreateTaskModalOpen(false);
+      await loadDashboardMetrics();
+    } catch (error) {
+      setCreateTaskError(error instanceof Error ? error.message : 'Unable to create the task.');
+    } finally {
+      setIsCreatingTask(false);
+    }
   };
 
   return (
@@ -262,11 +272,15 @@ export const DashboardPage: React.FC = () => {
       {/* Quick Create Task Modal */}
       <Modal
         isOpen={isCreateTaskModalOpen}
-        onClose={() => setIsCreateTaskModalOpen(false)}
+        onClose={() => {
+          setIsCreateTaskModalOpen(false);
+          setCreateTaskError(null);
+        }}
         title="Create New Task"
         description="Add a task to your daily list or assign it to a study subject."
       >
         <form onSubmit={handleCreateTask} className="space-y-4 pt-2">
+          {createTaskError && <p role="alert" className="text-xs text-rose-600">{createTaskError}</p>}
           <div>
             <label className="block text-xs font-semibold text-deep-purple dark:text-lavender-200 mb-1">
               Task Title
@@ -334,12 +348,16 @@ export const DashboardPage: React.FC = () => {
               variant="ghost"
               size="sm"
               pill
-              onClick={() => setIsCreateTaskModalOpen(false)}
+              onClick={() => {
+                setIsCreateTaskModalOpen(false);
+                setCreateTaskError(null);
+              }}
+              disabled={isCreatingTask}
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="sm" pill>
-              Create Task
+            <Button type="submit" variant="primary" size="sm" pill disabled={isCreatingTask}>
+              {isCreatingTask ? 'Creating...' : 'Create Task'}
             </Button>
           </div>
         </form>

@@ -3,7 +3,6 @@ const { validateStudyPlanCreateInput } = require("../validators/studyPlanValidat
 const defaultNotificationService = require("./notificationService");
 
 const SUBJECT_DEFAULT_COLOR = "#9885E8";
-const SUBJECTS_INCLUDE = { subjects: true };
 const SCHEDULE_INCLUDE = {
     subjects: {
         include: { scheduleItems: true }
@@ -224,7 +223,7 @@ function createStudyPlanService({
                     status: "DRAFT",
                     subjects: { create: data.subjects.map(toSubjectData) }
                 },
-                include: SUBJECTS_INCLUDE
+                include: SCHEDULE_INCLUDE
             });
         } catch (error) {
             throw mapPrismaError(error);
@@ -238,7 +237,7 @@ function createStudyPlanService({
             return await prismaClient.studyPlan.findMany({
                 where: { userId },
                 orderBy: { createdAt: "desc" },
-                include: SUBJECTS_INCLUDE
+                include: SCHEDULE_INCLUDE
             });
         } catch (error) {
             throw mapPrismaError(error);
@@ -406,7 +405,7 @@ function createStudyPlanService({
             return await prismaClient.$transaction(async (transaction) => {
                 const existingPlan = await transaction.studyPlan.findFirst({
                     where: { id: planId, userId },
-                    include: SUBJECTS_INCLUDE
+                    include: SCHEDULE_INCLUDE
                 });
                 if (!existingPlan) {
                     throw notFoundError();
@@ -450,7 +449,7 @@ function createStudyPlanService({
                 if (updateResult.count === 0) {
                     const latestPlan = await transaction.studyPlan.findFirst({
                         where: { id: planId, userId },
-                        include: SUBJECTS_INCLUDE
+                        include: SCHEDULE_INCLUDE
                     });
                     if (!latestPlan) {
                         throw notFoundError();
@@ -478,7 +477,7 @@ function createStudyPlanService({
 
                 const updatedPlan = await transaction.studyPlan.findFirst({
                     where: { id: planId, userId },
-                    include: SUBJECTS_INCLUDE
+                    include: SCHEDULE_INCLUDE
                 });
                 if (updatedPlan && notificationService) {
                     await notificationService.createNotification({

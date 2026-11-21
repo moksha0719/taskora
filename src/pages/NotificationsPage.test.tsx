@@ -2,16 +2,36 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { NotificationsPage } from './NotificationsPage';
+import { TopBar } from '../components/layout/TopBar';
 import { notificationsApi } from '../lib/api/client';
 import type { NotificationItem } from '../types';
+
+const auth = vi.hoisted(() => ({
+  user: { id: 'user-1', name: 'Test User' },
+  logout: vi.fn(),
+}));
+
+const theme = vi.hoisted(() => ({
+  config: { darkMode: 'light' },
+  toggleDarkMode: vi.fn(),
+}));
 
 vi.mock('../lib/api/client', () => ({
   notificationsApi: {
     getNotifications: vi.fn(),
+    getUnreadCount: vi.fn(),
     markRead: vi.fn(),
     markAllRead: vi.fn(),
     deleteNotification: vi.fn(),
   },
+}));
+
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => auth,
+}));
+
+vi.mock('../context/ThemeContext', () => ({
+  useTheme: () => theme,
 }));
 
 const unreadNotification: NotificationItem = {
@@ -54,5 +74,39 @@ describe('NotificationsPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Mark Read' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Read update failed');
+  });
+
+  it('updates the TopBar unread badge immediately and reconciles it with the API after marking read', async () => {
+    let markReadSucceeded = false;
+    let resolveRefreshedCount!: (count: number) => void;
+    const refreshedCount = new Promise<number>((resolve) => {
+      resolveRefreshedCount = resolve;
+    });
+    vi.mocked(notificationsApi.getNotifications).mockImplementation(async () => [
+      { ...unreadNotification, read: markReadSucceeded },
+    ]);
+    vi.mocked(notificationsApi.getUnreadCount)
+      .mockReset()
+      .mockResolvedValueOnce(1)
+      .mockReturnValueOnce(refreshedCount);
+    vi.mocked(notificationsApi.markRead).mockImplementation(async () => {
+      markReadSucceeded = true;
+    });
+
+    render(
+      <MemoryRouter>
+        <TopBar onToggleMobileNav={vi.fn()} />
+        <NotificationsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByLabelText('1 unread notifications')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark Read' }));
+
+    await waitFor(() => expect(notificationsApi.getUnreadCount).toHaveBeenCalledTimes(2));
+    expect(screen.queryByLabelText('1 unread notifications')).not.toBeInTheDocument();
+    expect(notificationsApi.markRead).toHaveBeenCalledWith('notification-1');
+
+    resolveRefreshedCount(0);
   });
 });

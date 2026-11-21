@@ -48,7 +48,9 @@ fingerprinting and include `X-Content-Type-Options: nosniff`,
 and always returns a generic `202` response for syntactically valid emails.
 Known accounts receive an opaque 32-byte reset token with a SHA-256 hash stored
 in the database. The token expires after 30 minutes and is invalidated after use.
-Only an exact, unexpired, unused token can reset a password.
+`PASSWORD_RESET_TOKEN_TTL_MINUTES` configures the lifetime in minutes (default
+`30`, accepted range `1`–`1440`). Only an exact, unexpired, unused token can
+reset a password.
 
 The default local `EMAIL_PROVIDER=mock` does not send mail. For Resend, configure
 `EMAIL_PROVIDER=resend`, `EMAIL_API_KEY`, a provider-verified `EMAIL_FROM`,
@@ -252,31 +254,31 @@ return `"Unsupported task field: <field>"`; an empty `PUT` returns
 
 ### `POST /api/ai/assistant`
 
-Protected. Accepts only a non-empty `message` string of at most 4,000
-characters:
+Protected. Accepts a non-empty `message` string of at most 4,000 characters
+and an optional owned `conversationId`:
 
 ```json
 { "message": "Help me plan my study session." }
 ```
 
-Success (`200`):
+When `conversationId` is omitted, success (`200`) returns assistant text:
 
 ```json
 { "response": "A text response from the assistant." }
 ```
 
-This endpoint returns assistant text; it does not create a frontend
-`AIProposal` or persist messages. Persistent conversations and explicit
-task-proposal approval are available through the conversation endpoints below.
-Validation failures return `400`. Each authenticated user is limited to 10
+When `conversationId` is supplied, the endpoint persists the user and assistant
+messages and any task proposals in that owned conversation, returning `201`.
+The request uses the same ownership checks and response shape as the conversation
+message endpoint. Validation failures return `400`. Each authenticated user is limited to 10
 requests per 15-minute window (`429` with
 `{"error":"Too many AI requests. Please try again later."}`). The limiter uses
 the process's in-memory default store. AI configuration failures return `503`,
-provider failures return `502`, and timeouts return `504`. These errors do not
-expose provider details.
+provider rate limits return `429`, other provider failures return `502`, and
+timeouts return `504`. These errors do not expose provider details.
 
 Validation error examples are `"A JSON object is required"`,
-`"Only the message field is accepted"`,
+`"Only the message and optional conversationId fields are accepted"`,
 `"Message must be a non-empty string"`, and
 `"Message must be 4000 characters or fewer"`.
 
@@ -328,8 +330,8 @@ an expired proposal returns `409` and is marked `EXPIRED`.
 Message creation uses the same per-user AI request limit as
 `POST /api/ai/assistant`. Invalid messages or IDs return `400`; missing or
 cross-user resources return `404`; expired or already resolved proposals return
-`409`. Provider configuration, timeout, and provider errors use `503`, `504`,
-and `502` respectively.
+`409`. Provider configuration, timeout, rate limit, and other provider errors
+use `503`, `504`, `429`, and `502` respectively.
 
 ## Brain Dump
 
@@ -362,9 +364,9 @@ The summary must be non-empty and at most 500 characters. There can be at most
 20 proposed tasks; each has a non-empty title up to 120 characters and priority
 `LOW`, `MEDIUM`, or `HIGH`. Optional description is non-empty and at most 1,000
 characters; optional due date is a valid ISO date or date-time. Invalid input
-returns `400`; invalid AI output returns `502`; configuration, provider, and
-timeout errors return `503`, `502`, and `504`. Each authenticated user is
-limited to 5 requests per 15-minute window (`429` with
+returns `400`; invalid AI output returns `502`; configuration, provider, rate
+limit, and timeout errors return `503`, `502`, `429`, and `504`. Each
+authenticated user is limited to 5 requests per 15-minute window (`429` with
 `{"error":"Too many Brain Dump requests. Please try again later."}`). The
 limiter uses the process's in-memory default store.
 
@@ -431,6 +433,15 @@ the data owner.
   note's ID, title, content, subject name, tags, and update time. Private notes
   and invalid codes return `404`.
 
+### Flashcards
+
+- Deck and card operations are authenticated and owner-scoped. Review accepts
+  an integer quality from `0` to `5`; other values return `400`.
+- `POST /api/flashcards/cards/:cardId/review` reviews a card. The compatible
+  `POST /api/flashcards/:cardId/review` path is also available. Successful
+  reviews update the SM-2 repetition count, ease factor, interval, review
+  count, last-reviewed time, and `dueAt` (the next review date).
+
 ### Focus sessions and XP
 
 - `POST /api/focus/sessions/start` accepts a subject and an integer duration
@@ -439,9 +450,18 @@ the data owner.
 - `POST /api/focus/sessions` accepts only `{ "sessionToken": "..." }`.
   The backend checks the signature, user, expiry, elapsed server time, and
   overlap with prior sessions before persisting a session and awarding XP in
-  one transaction. Completion tokens are single-use; early, overlapping, and
-  replayed completions return `409`.
+  one transaction. Replaying a completed token returns the stored session
+  with `200` and does not award XP again. Early and overlapping completions
+  return `409`.
+- `POST /api/focus-sessions` accepts the same completion payload and provides
+  a compatibility route for clients using the hyphenated path.
 - `GET /api/focus/sessions` lists the caller's completed sessions.
+- `GET /api/focus-sessions/today` returns `{ "date", "timeZone",
+  "totalFocusMinutes" }` for the authenticated caller. The caller can provide
+  an IANA zone with `?timeZone=America%2FNew_York`; the current `User` model
+  does not persist a time zone, so the endpoint defaults to UTC when omitted.
+  It uses an inclusive start and exclusive next-day boundary, including
+  daylight-saving transitions.
 
 Client-submitted XP amounts and arbitrary XP writes are not accepted.
 

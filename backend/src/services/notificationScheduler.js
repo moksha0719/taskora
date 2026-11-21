@@ -150,15 +150,13 @@ function createNotificationScheduler({
     setIntervalFunction = setInterval,
     clearIntervalFunction = clearInterval,
     onError = (error) => console.error(
-    "Notification scheduler run failed:",
-    {
-        name: error?.name,
-        code: error?.code,
-        message: error?.message,
-        meta: error?.meta,
-        clientVersion: error?.clientVersion
-    }
-)
+        "Notification scheduler run failed:",
+        {
+            name: error && error.name,
+            code: error && error.code,
+            meta: error && error.meta
+        }
+    )
 } = {}) {
     let timer = null;
     let activeRun = null;

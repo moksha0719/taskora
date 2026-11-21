@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const { rateLimit } = require("express-rate-limit");
 const { JWT_AUDIENCE, JWT_ISSUER, getJwtSecret } = require("../config/auth");
+const { getPasswordResetTokenTtlMs } = require("../config/passwordReset");
 const authenticateToken = require("../middleware/authenticateToken");
 const { validateCredentials } = require("../validators/authValidators");
 const { createPasswordResetDeliveryService } = require("../services/passwordResetDeliveryService");
@@ -48,6 +49,7 @@ function createAuthRouter(
     profilePhotoStorage = createProfilePhotoStorage()
 ) {
     const router = express.Router();
+    const passwordResetTokenTtlMs = getPasswordResetTokenTtlMs();
     const authRateLimit = rateLimit({
         windowMs: 15 * 60 * 1000,
         limit: 10,
@@ -251,8 +253,10 @@ function createAuthRouter(
             }
             const currentPassword = typeof req.body.currentPassword === "string" ? req.body.currentPassword : "";
             const newPassword = typeof req.body.newPassword === "string" ? req.body.newPassword : "";
+            const currentPasswordBytes = Buffer.byteLength(currentPassword, "utf8");
             const newPasswordBytes = Buffer.byteLength(newPassword, "utf8");
-            if (!currentPassword || newPasswordBytes < 8 || newPasswordBytes > 72) {
+            if (currentPasswordBytes < 1 || currentPasswordBytes > 72 ||
+                newPasswordBytes < 8 || newPasswordBytes > 72) {
                 return res.status(400).json({ error: "Current password and a valid new password are required" });
             }
             const user = await prisma.user.findUnique({
@@ -286,7 +290,7 @@ function createAuthRouter(
             const email = typeof req.body.email === "string"
                 ? req.body.email.trim().toLowerCase()
                 : "";
-            if (!email || email.length > 254) {
+            if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
                 return res.status(400).json({ error: "A valid email is required" });
             }
             const user = await prisma.user.findUnique({ where: { email } });
@@ -297,7 +301,7 @@ function createAuthRouter(
                     where: { userId: user.id, usedAt: null },
                     data: { usedAt: new Date() }
                 });
-                const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+                const expiresAt = new Date(Date.now() + passwordResetTokenTtlMs);
                 await prisma.passwordResetToken.create({
                     data: { userId: user.id, tokenHash, expiresAt }
                 });
