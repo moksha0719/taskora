@@ -8,17 +8,26 @@ import confetti from 'canvas-confetti';
 
 interface TodoWidgetProps {
   onOpenCreateModal?: () => void;
+  onTasksChanged?: () => void;
+  refreshKey?: number;
 }
 
-export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => {
+export const TodoWidget: React.FC<TodoWidgetProps> = ({
+  onOpenCreateModal,
+  onTasksChanged,
+  refreshKey = 0,
+}) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [quickTitle, setQuickTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setError(null);
     tasksApi.getTasks()
       .then((allTasks) => {
         if (active) setTasks(allTasks.slice(0, 5));
@@ -32,7 +41,7 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
     return () => {
       active = false;
     };
-  }, []);
+  }, [refreshKey]);
 
   const handleToggle = async (taskId: string) => {
     setError(null);
@@ -41,6 +50,7 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
       setTasks((prev) =>
         prev.map((t) => (t.id === taskId ? updated : t))
       );
+      onTasksChanged?.();
 
       if (updated.status === 'completed') {
         confetti({
@@ -57,9 +67,10 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
 
   const handleQuickAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickTitle.trim()) return;
+    if (!quickTitle.trim() || saving) return;
 
     setError(null);
+    setSaving(true);
     try {
       const newTask = await tasksApi.createTask({
         title: quickTitle.trim(),
@@ -74,13 +85,16 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
       setTasks((prev) => [newTask, ...prev.slice(0, 4)]);
       setQuickTitle('');
       setIsAdding(false);
+      onTasksChanged?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to create this task.');
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <Card className="p-6">
+    <Card className="rounded-3xl p-6 shadow-sm transition-shadow hover:shadow-md">
       {/* Header matching reference with pink '+' button */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base sm:text-lg font-bold font-heading text-deep-purple dark:text-white">
@@ -115,9 +129,10 @@ export const TodoWidget: React.FC<TodoWidgetProps> = ({ onOpenCreateModal }) => 
             />
             <button
               type="submit"
-              className="text-xs px-3 py-2 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover"
+              disabled={saving}
+              className="text-xs px-3 py-2 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover disabled:opacity-50"
             >
-              Add
+              {saving ? 'Saving...' : 'Add'}
             </button>
           </div>
         </form>

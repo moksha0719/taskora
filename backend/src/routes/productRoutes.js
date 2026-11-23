@@ -62,6 +62,13 @@ function serializeStudyRoom(room) {
     };
 }
 
+function isInviteCodeConflict(error) {
+    if (!error || error.code !== "P2002") return false;
+    const target = error.meta && error.meta.target;
+    return (Array.isArray(target) && target.includes("inviteCode")) ||
+        (typeof target === "string" && target.includes("inviteCode"));
+}
+
 function parseCivilDate(value) {
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
         return null;
@@ -567,7 +574,7 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
     router.get("/study-rooms", async (req, res, next) => {
         try {
             const rooms = await prisma.studyRoom.findMany({
-                where: { OR: [{ isPrivate: false }, { ownerId: req.user.id }, { participants: { some: { userId: req.user.id } } }] },
+                where: { isPrivate: false },
                 include: {
                     participants: { include: { user: { select: { id: true, name: true, avatar: true } } } },
                     messages: {
@@ -618,31 +625,99 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
                 breakDurationMinutes < 1 || breakDurationMinutes > 1440) {
                 return res.status(400).json({ error: "Focus and break durations must be positive minutes" });
             }
-            const passcode = req.body.isPrivate
+            const isPrivate = req.body.isPrivate === true;
+            const passcode = isPrivate
                 ? (typeof req.body.passcode === "string" ? req.body.passcode : "")
                 : null;
-            if (req.body.isPrivate && (!passcode || passcode.length < 4 || passcode.length > 64)) {
+            if (isPrivate && (!passcode || passcode.length < 4 || passcode.length > 64)) {
                 return res.status(400).json({ error: "Private rooms require a passcode from 4 to 64 characters" });
             }
-            const room = await prisma.studyRoom.create({
-                data: {
-                    ownerId: req.user.id,
-                    name,
-                    topic,
-                    isPrivate: req.body.isPrivate === true,
-                    passcodeHash: passcode ? await bcrypt.hash(passcode, 10) : null,
-                    maxParticipants,
-                    focusDurationMinutes: focusDurationMinutes || 25,
-                    breakDurationMinutes: breakDurationMinutes || 5,
-                    participants: { create: { userId: req.user.id, status: "focusing" } }
-                },
-                include: {
-                    participants: { include: { user: { select: { id: true, name: true, avatar: true } } } },
-                    messages: { include: { user: { select: { id: true, name: true, avatar: true } } } }
+            const roomData = {
+                ownerId: req.user.id,
+                name,
+                topic,
+                isPrivate,
+                passcodeHash: passcode ? await bcrypt.hash(passcode, 10) : null,
+                maxParticipants,
+                focusDurationMinutes: focusDurationMinutes || 25,
+                breakDurationMinutes: breakDurationMinutes || 5,
+                participants: { create: { userId: req.user.id, status: "focusing" } }
+            };
+            const roomInclude = {
+                participants: { include: { user: { select: { id: true, name: true, avatar: true } } } },
+                messages: { include: { user: { select: { id: true, name: true, avatar: true } } } }
+            };
+            let room;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    room = await prisma.studyRoom.create({
+                        data: {
+                            ...roomData,
+                            inviteCode: isPrivate ? crypto.randomUUID().slice(0, 8) : null
+                        },
+                        include: roomInclude
+                    });
+                    break;
+                } catch (error) {
+                    if (!isPrivate || !isInviteCodeConflict(error) || attempt === 2) {
+                        throw error;
+                    }
                 }
-            });
+            }
             res.status(201).json({ room: serializeStudyRoom(room) });
         } catch (error) { next(error); }
+    });
+
+    router.post("/study-rooms/join-invite/:inviteCode", async (req, res, next) => {
+        const { inviteCode } = req.params;
+        if (!/^[a-f0-9]{8}$/.test(inviteCode)) {
+            return res.status(404).json({ error: "Study room not found" });
+        }
+        try {
+            const joined = await prisma.$transaction(async (tx) => {
+                const room = await tx.studyRoom.findUnique({ where: { inviteCode } });
+                if (!room) return { status: 404, error: "Study room not found" };
+
+                const existing = await tx.roomParticipant.findUnique({
+                    where: { roomId_userId: { roomId: room.id, userId: req.user.id } }
+                });
+                if (!existing) {
+                    const participantCount = await tx.roomParticipant.count({
+                        where: { roomId: room.id }
+                    });
+                    if (participantCount >= room.maxParticipants) {
+                        return { status: 409, error: "Study room is full" };
+                    }
+                }
+                await tx.roomParticipant.upsert({
+                    where: { roomId_userId: { roomId: room.id, userId: req.user.id } },
+                    create: { roomId: room.id, userId: req.user.id, status: "focusing" },
+                    update: { status: "focusing" }
+                });
+                const roomDetails = await tx.studyRoom.findUnique({
+                    where: { id: room.id },
+                    include: {
+                        participants: {
+                            include: { user: { select: { id: true, name: true, avatar: true } } }
+                        },
+                        messages: {
+                            orderBy: { createdAt: "desc" },
+                            take: 50,
+                            include: { user: { select: { id: true, name: true, avatar: true } } }
+                        }
+                    }
+                });
+                return { status: 200, room: roomDetails };
+            }, { isolationLevel: "Serializable" });
+            if (joined.error) return res.status(joined.status).json({ error: joined.error });
+            broadcastRoom(joined.room.id, { type: "room_presence" });
+            return res.json({ joined: true, room: serializeStudyRoom(joined.room) });
+        } catch (error) {
+            if (error && error.code === "P2034") {
+                return res.status(409).json({ error: "Study room capacity changed; please retry joining" });
+            }
+            return next(error);
+        }
     });
 
     router.post("/study-rooms/:id/join", async (req, res, next) => {
@@ -776,9 +851,6 @@ function createProductRouter(prisma, { now = () => new Date() } = {}) {
         try {
             const room = await prisma.studyRoom.findUnique({ where: { id: req.params.id } });
             if (!room) return res.status(404).json({ error: "Study room not found" });
-            if (room.ownerId === req.user.id) {
-                return res.status(409).json({ error: "Room owners must delete the room instead of leaving it" });
-            }
             const result = await prisma.roomParticipant.deleteMany({
                 where: { roomId: room.id, userId: req.user.id }
             });

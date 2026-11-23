@@ -4,7 +4,7 @@
 
 Taskora is a productivity and study-management application for university students and knowledge workers. Its React frontend presents a dashboard and tools for tasks, study planning, focus sessions, habits, notes, and AI-assisted organization.
 
-> **Project status:** Authentication, tasks, notifications, AI/Brain Dump, Study Planner, flashcards, habits, notes, focus sessions, study rooms, gamification summaries, analytics and search have owner-scoped API adapters. Password recovery uses persisted, expiring, single-use tokens; real email delivery requires Resend credentials or a configured delivery webhook. Study rooms use persisted shared timers with same-process SSE events and client polling fallback. Cross-replica real-time delivery requires pub/sub configuration.
+> **Project status:** Authentication, tasks, notifications, AI, Study Planner, flashcards, habits, notes, focus sessions, study rooms, gamification summaries, analytics and search have owner-scoped API adapters. Password recovery uses persisted, expiring, single-use tokens; real email delivery requires Resend credentials or a configured delivery webhook. Study rooms use persisted shared timers with same-process SSE events and client polling fallback. Cross-replica real-time delivery requires pub/sub configuration.
 
 ## Current features and prototype scope
 
@@ -22,7 +22,6 @@ The existing frontend describes these screens and interactions:
 | **FR-08 Analytics** | `/analytics` | 7D/30D/semester selectors, focus trends, and course distribution charts. |
 | **FR-09 Gamification** | `/achievements` | Scholar levels, XP progress, badges, and transaction-style history UI. |
 | **FR-10 Study Workspace** | `/workspace` | Persisted private-by-default notes through owner-scoped APIs. |
-| **FR-11 Brain Dump** | `/brain-dump` | Persistent quick capture and AI organization; proposed tasks are created only after explicit approval. |
 | **FR-12 Virtual Study Rooms** | `/study-rooms` | Persisted room creation, passcode-protected join, owner-only edit/delete/timer controls, leave actions, and SSE with polling fallback. Cross-replicas delivery requires pub/sub. |
 | **Flashcards** | `/flashcards` | Owner-scoped deck/card management with persisted SM-2 review scheduling. |
 | **FR-13 Notifications** | `/notifications` | Backend-backed notification center with read/read-all, deletion actions, synchronized unread count, and visible request errors. |
@@ -52,19 +51,19 @@ The frontend uses a soft pastel visual system with rounded cards, generous spaci
 | Frontend | React 18, TypeScript, Vite, React Router | Present |
 | Styling and UI | Tailwind CSS, CSS design tokens, Lucide | Present |
 | Charts and animation | Recharts, Framer Motion, Canvas Confetti, Web Audio API | Present in frontend |
-| Frontend data layer | Typed API client plus browser `localStorage` preferences | Authentication, tasks, Study Planner, AI/Brain Dump, notifications and product data use Express; theme/dashboard preferences remain browser-local |
+| Frontend data layer | Typed API client plus browser `localStorage` preferences | Authentication, tasks, Study Planner, AI, notifications and product data use Express; theme/dashboard preferences remain browser-local |
 | Backend | Node.js, Express, CORS, dotenv | Authenticated API routes present |
 | Database | PostgreSQL | Prisma-backed schema and migrations present |
 | ORM | Prisma | Configured in `backend/` |
 | Authentication | bcrypt password hashing and JWT | Backend-backed registration and login |
-| AI integration | Google Gemini through the backend | Assistant conversations/proposals and Brain Dump processing use authenticated backend APIs; the active conversation identifier is stored in session storage. Gemini endpoints require server-side provider configuration. |
+| AI integration | Google Gemini through the backend | Assistant conversations and proposals use authenticated backend APIs; the active conversation identifier is stored in session storage. Gemini endpoints require server-side provider configuration. |
 
 ## Architecture
 
 ### Current implementation
 
 1. The browser runs the React application using Vite.
-2. Authentication, tasks, Study Planner, calendar, AI/Brain Dump, notifications, and persisted product modules call the typed API client in `src/lib/api/client.ts`, which sends the JWT to the Express API.
+2. Authentication, tasks, Study Planner, calendar, AI, notifications, and persisted product modules call the typed API client in `src/lib/api/client.ts`, which sends the JWT to the Express API.
 3. Product data is owner-scoped through the Express API where implemented. Theme and dashboard preferences remain browser-local.
 4. The Express server exposes authentication and persisted feature routes backed by Prisma and PostgreSQL.
 
@@ -145,7 +144,7 @@ The root [.env.example](./.env.example) contains frontend settings. Backend secr
 
 Create a root `.env` for local Vite settings as needed. The existing example names `VITE_HOST`, `VITE_PORT`, and `VITE_API_BASE_URL`. Variables prefixed with `VITE_` are intended for frontend use and may be included in browser code; **never put secrets in them**.
 
-Authentication, tasks, Study Planner, AI/Brain Dump, notifications and product APIs use this API base URL. Theme and dashboard preferences remain browser-local.
+Authentication, tasks, Study Planner, AI, notifications and product APIs use this API base URL. Theme and dashboard preferences remain browser-local.
 
 ### Backend
 
@@ -261,7 +260,7 @@ The backend exposes these API areas:
 | `POST` | `/api/auth/login` | Sign in and receive a JWT. |
 | `GET` | `/api/auth/me` | Resolve the authenticated user. |
 | `*` | `/api/study-plans/*` | Study-plan CRUD, schedule preview, and completion operations; see [Phase 06 API contract](./docs/phase06-api-contract.md). |
-| `*` | `/api/tasks/*`, `/api/ai/*`, `/api/brain-dumps/*`, `/api/notifications/*` | Task, AI, Brain Dump, and notification APIs. |
+| `*` | `/api/tasks/*`, `/api/ai/*`, `/api/notifications/*` | Task, AI, and notification APIs. |
 | `*` | `/api/habits/*`, `/api/notes/*`, `/api/focus/*`, `/api/study-rooms/*` | Persisted habits, notes, timed focus sessions, and study rooms. |
 | `*` | `/api/gamification`, `/api/analytics`, `/api/search`, `/api/admin/*`, `/api/reports` | XP summaries, analytics, unified search, moderation, and role-protected admin operations. |
 
@@ -284,7 +283,6 @@ The original README listed the following SRS acceptance scenarios. They are reta
 - **TC05 Focus mode:** run a configurable timer, complete a server-timed session, and award XP once.
 - **TC06 Habit check-in:** update a daily streak while retaining historical check-ins.
 - **TC07 Study plan:** create a plan, generate a preview from explicit availability windows, and test saved-item completion endpoints.
-- **TC08 Brain Dump:** capture unstructured text and propose an organized result.
 - **TC09 Gamification:** attribute XP to its source and avoid duplicate awards.
 - **TC10 Study rooms:** validate a private-room passcode before joining.
 - **TC11 Analytics:** calculate focus-time and completion metrics for charts.
@@ -294,7 +292,7 @@ The original README listed the following SRS acceptance scenarios. They are reta
 
 ## Next steps
 
-The backend provides authentication, task, AI Assistant, Brain Dump, Study Planner, notification, habits, notes, focus, rooms, gamification, analytics and search APIs. Password recovery requires a configured delivery webhook. Room SSE synchronization is single-process and needs pub/sub for multiple replicas. Validate database-backed integrations and deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
+The backend provides authentication, task, AI Assistant, Study Planner, notification, habits, notes, focus, rooms, gamification, analytics and search APIs. Password recovery requires a configured delivery webhook. Room SSE synchronization is single-process and needs pub/sub for multiple replicas. Validate database-backed integrations and deployment in the target environment. [BACKEND_PLAN.md](./BACKEND_PLAN.md) is the original implementation roadmap and may not reflect the current completion status of every milestone.
 
 ## Team contribution overview
 

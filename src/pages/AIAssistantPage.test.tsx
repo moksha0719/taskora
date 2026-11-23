@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { AIAssistantPage } from './AIAssistantPage';
 import { ThemeProvider } from '../context/ThemeContext';
 
@@ -28,11 +29,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function renderPage() {
+function renderPage(state?: { initialPrompt?: string }) {
   return render(
-    <ThemeProvider>
-      <AIAssistantPage />
-    </ThemeProvider>
+    <MemoryRouter initialEntries={[{ pathname: '/ai-assistant', state }]}>
+      <ThemeProvider>
+        <AIAssistantPage />
+      </ThemeProvider>
+    </MemoryRouter>
   );
 }
 
@@ -52,7 +55,7 @@ describe('AI assistant conversation workflows', () => {
     vi.clearAllMocks();
   });
 
-  it('sends through the assistant endpoint while preserving conversation and proposal workflows', async () => {
+  it('sends through the saved-conversation endpoint and preserves conversation and proposal workflows', async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       if (url.pathname === '/api/ai/conversations' && (!init?.method || init.method === 'GET')) {
@@ -87,7 +90,7 @@ describe('AI assistant conversation workflows', () => {
           },
         });
       }
-      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
+      if (url.pathname === `/api/ai/conversations/${secondConversation.id}/messages` && init?.method === 'POST') {
         return jsonResponse({
           conversationId: secondConversation.id,
           userMessage: { id: 'saved-user-message', content: 'Plan my revision' },
@@ -170,13 +173,10 @@ describe('AI assistant conversation workflows', () => {
     )).toHaveLength(0);
 
     const sentCall = fetchMock.mock.calls.find(([input, init]) =>
-      new URL(String(input)).pathname === '/api/ai/assistant' && init?.method === 'POST'
+      new URL(String(input)).pathname === `/api/ai/conversations/${secondConversation.id}/messages` && init?.method === 'POST'
     );
     expect(sentCall).toBeDefined();
-    expect(JSON.parse(String(sentCall?.[1]?.body))).toEqual({
-      message: 'Plan my revision',
-      conversationId: secondConversation.id,
-    });
+    expect(JSON.parse(String(sentCall?.[1]?.body))).toEqual({ message: 'Plan my revision' });
     expect(sessionStorage.getItem('taskora_ai_conversation_id')).toBe(secondConversation.id);
 
     fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
@@ -199,7 +199,7 @@ describe('AI assistant conversation workflows', () => {
       if (url.pathname === '/api/ai/conversations' && (!init?.method || init.method === 'GET')) {
         return jsonResponse({ conversations: [firstConversation] });
       }
-      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}/messages` && init?.method === 'POST') {
         return jsonResponse({ error: 'AI service is not configured' }, 503);
       }
       throw new Error(`Unexpected API request: ${init?.method || 'GET'} ${url.pathname}`);
@@ -217,6 +217,56 @@ describe('AI assistant conversation workflows', () => {
     expect(screen.queryByText('Help me plan')).not.toBeInTheDocument();
   });
 
+  it('prefills a prompt sent from the dashboard widget', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}`) {
+        return jsonResponse({ conversation: { messages: [], proposals: [] } });
+      }
+      if (url.pathname === '/api/ai/conversations') {
+        return jsonResponse({ conversations: [firstConversation] });
+      }
+      throw new Error(`Unexpected API request: ${url.pathname}`);
+    });
+
+    renderPage({ initialPrompt: 'Help me plan my study week' });
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveValue('Help me plan my study week');
+    });
+  });
+
+  it('shows a friendly message and preserves the draft for invalid structured AI output', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}`) {
+        return jsonResponse({ conversation: { messages: [], proposals: [] } });
+      }
+      if (url.pathname === '/api/ai/conversations' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse({ conversations: [firstConversation] });
+      }
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}/messages` && init?.method === 'POST') {
+        return jsonResponse({ error: 'AI returned an invalid response' }, 502);
+      }
+      throw new Error(`Unexpected API request: ${init?.method || 'GET'} ${url.pathname}`);
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Break down my Distributed Systems exam prep into 4 tasks' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The AI response could not be formatted into task proposals. Please try again or rephrase your request.'
+    );
+    expect(screen.getByRole('textbox')).toHaveValue(
+      'Break down my Distributed Systems exam prep into 4 tasks'
+    );
+    expect(screen.queryByText('Taskora AI is preparing a response...')).not.toBeInTheDocument();
+  });
+
   it('shows a loading indicator until the assistant endpoint responds', async () => {
     let resolveResponse: ((response: Response) => void) | undefined;
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -227,7 +277,7 @@ describe('AI assistant conversation workflows', () => {
       if (url.pathname === '/api/ai/conversations') {
         return jsonResponse({ conversations: [firstConversation] });
       }
-      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}/messages` && init?.method === 'POST') {
         return new Promise<Response>((resolve) => {
           resolveResponse = resolve;
         });
@@ -267,7 +317,7 @@ describe('AI assistant conversation workflows', () => {
       if (url.pathname === '/api/ai/conversations') {
         return jsonResponse({ conversations: [firstConversation] });
       }
-      if (url.pathname === '/api/ai/assistant' && init?.method === 'POST') {
+      if (url.pathname === `/api/ai/conversations/${firstConversation.id}/messages` && init?.method === 'POST') {
         return jsonResponse({ error: 'AI response timed out' }, 504);
       }
       throw new Error(`Unexpected API request: ${init?.method || 'GET'} ${url.pathname}`);

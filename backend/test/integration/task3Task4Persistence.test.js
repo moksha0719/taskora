@@ -153,7 +153,6 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
     const prisma = require("../../src/lib/prisma");
     const createApp = require("../../src/app");
     const { createAiConversationService } = require("../../src/services/aiConversationService");
-    const { createBrainDumpWorkflowService } = require("../../src/services/brainDumpWorkflowService");
 
     const aiService = {
         generateContent: async () => JSON.stringify({
@@ -164,21 +163,7 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
             ]
         })
     };
-    const brainDumpProcessingService = {
-        processText: async () => ({
-            summary: "Prepare for the final exams.",
-            tasks: [
-                {
-                    title: "Review chemistry",
-                    priority: "HIGH",
-                    dueDate: "2026-12-01"
-                },
-                { title: "Organize notes", priority: "LOW" },
-                { title: "Practice questions", priority: "MEDIUM" }
-            ]
-        })
-    };
-    const app = createApp({ prismaClient: prisma, aiService, brainDumpProcessingService });
+    const app = createApp({ prismaClient: prisma, aiService });
     const server = await listen(app);
     const testUserIds = [];
     t.after(async () => {
@@ -363,116 +348,6 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
         "PENDING"
     );
 
-    const brainDumpResponse = await request(
-        server.baseUrl,
-        "POST",
-        "/api/brain-dumps",
-        userA.token,
-        { text: "Chemistry, notes, and practice questions" }
-    );
-    assert.equal(brainDumpResponse.response.status, 201);
-    const brainDump = brainDumpResponse.body.brainDump;
-    assert.equal(brainDump.inputText, "Chemistry, notes, and practice questions");
-    assert.equal(brainDump.proposals.length, 3);
-    const dueDateProposal = brainDump.proposals.find(
-        (proposal) => proposal.title === "Review chemistry"
-    );
-    const rejectedProposal = brainDump.proposals.find(
-        (proposal) => proposal.title === "Organize notes"
-    );
-    const rollbackProposal = brainDump.proposals.find(
-        (proposal) => proposal.title === "Practice questions"
-    );
-    assert.ok(dueDateProposal);
-    assert.ok(rejectedProposal);
-    assert.ok(rollbackProposal);
-    await assert.rejects(
-        prisma.brainDumpTaskProposal.create({
-            data: {
-                brainDumpId: brainDump.id,
-                userId: userB.user.id,
-                title: "Cross-owner proposal",
-                priority: "LOW"
-            }
-        }),
-        (error) => error.code === "P2003"
-    );
-    assert.equal(
-        (await request(
-            server.baseUrl,
-            "GET",
-            `/api/brain-dumps/${brainDump.id}`,
-            userB.token
-        )).response.status,
-        404
-    );
-    assert.equal(
-        (await request(
-            server.baseUrl,
-            "POST",
-            `/api/brain-dumps/${brainDump.id}/proposals/${dueDateProposal.id}/approve`,
-            userB.token,
-            {}
-        )).response.status,
-        404
-    );
-    const brainDumpApproval = await request(
-        server.baseUrl,
-        "POST",
-        `/api/brain-dumps/${brainDump.id}/proposals/${dueDateProposal.id}/approve`,
-        userA.token,
-        {}
-    );
-    assert.equal(brainDumpApproval.response.status, 200);
-    assert.equal(
-        brainDumpApproval.body.task.dueDate,
-        "2026-12-01T00:00:00.000Z"
-    );
-    assert.equal(
-        (await request(
-            server.baseUrl,
-            "POST",
-            `/api/brain-dumps/${brainDump.id}/proposals/${rejectedProposal.id}/reject`,
-            userA.token,
-            {}
-        )).response.status,
-        200
-    );
-    assert.equal(
-        (await request(
-            server.baseUrl,
-            "POST",
-            `/api/brain-dumps/${brainDump.id}/proposals/${dueDateProposal.id}/approve`,
-            userA.token,
-            {}
-        )).response.status,
-        409
-    );
-
-    const rollbackBrainDumpService = createBrainDumpWorkflowService({
-        prismaClient: prisma,
-        processingService: brainDumpProcessingService,
-        taskService: {
-            createTask: async () => {
-                throw new Error("Injected Brain Dump task creation failure");
-            }
-        }
-    });
-    await assert.rejects(
-        rollbackBrainDumpService.approveTaskProposal(
-            userA.user.id,
-            brainDump.id,
-            rollbackProposal.id
-        ),
-        /Injected Brain Dump task creation failure/
-    );
-    assert.equal(
-        (await prisma.brainDumpTaskProposal.findUnique({
-            where: { id: rollbackProposal.id }
-        })).status,
-        "PENDING"
-    );
-
     const planA = await createScheduledPlan(server.baseUrl, userA.token, "Task 4 plan A");
     const planB = await createScheduledPlan(server.baseUrl, userA.token, "Task 4 plan B");
     const planC = await createScheduledPlan(
@@ -616,7 +491,8 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
             "20261118160000_add_product_persistence",
             "20261120140000_preserve_task_data_and_cascade_accounts",
             "20261120143000_validate_focus_session_completion",
-            "20261120235500_add_flashcards_and_room_timer_state"
+            "20261120235500_add_flashcards_and_room_timer_state",
+            "20261123140953_add_study_room_invite_code"
         ]
     );
 
@@ -786,19 +662,13 @@ test("Task 3 and Task 4 persistence, ownership, migration structure, and rollbac
             2
         );
         assert.equal(
-            await freshClient.brainDump.count({
-                where: { id: brainDump.id, userId: userA.user.id }
-            }),
-            1
-        );
-        assert.equal(
             await freshClient.task.count({
                 where: {
-                    id: { in: [approvedAiTask.body.task.id, brainDumpApproval.body.task.id] },
+                    id: approvedAiTask.body.task.id,
                     userId: userA.user.id
                 }
             }),
-            2
+            1
         );
         assert.equal(
             await freshClient.sessionCompletion.count({

@@ -134,6 +134,7 @@ test("product routes enforce authentication and persist owner-scoped habits and 
         focusSession: focusSessionModel,
         studyRoom: {
             findMany: async (args) => {
+                assert.deepEqual(args.where, { isPrivate: false });
                 assert.deepEqual(args.include.participants.include.user.select, {
                     id: true,
                     name: true,
@@ -147,10 +148,11 @@ test("product routes enforce authentication and persist owner-scoped habits and 
                 return [{
                     id: "44444444-4444-4444-8444-444444444444",
                     ownerId: userId,
-                    name: "Private room",
+                    name: "Public room",
                     topic: "Revision",
-                    isPrivate: true,
-                    passcodeHash: "test-only-hash",
+                    isPrivate: false,
+                    inviteCode: null,
+                    passcodeHash: null,
                     participants: [{
                         id: "participant-id",
                         userId,
@@ -175,6 +177,11 @@ test("product routes enforce authentication and persist owner-scoped habits and 
             },
             findUnique: async () => null,
             create: async (args) => {
+                if (args.data.isPrivate) {
+                    assert.match(args.data.inviteCode, /^[0-9a-f]{8}$/);
+                } else {
+                    assert.equal(args.data.inviteCode, null);
+                }
                 assert.deepEqual(args.include.participants.include.user.select, {
                     id: true,
                     name: true,
@@ -333,7 +340,7 @@ test("product routes enforce authentication and persist owner-scoped habits and 
     });
     assert.equal(listedRoomsResponse.status, 200);
     const listedRoom = (await listedRoomsResponse.json()).rooms[0];
-    assert.equal(listedRoom.isPrivate, true);
+    assert.equal(listedRoom.isPrivate, false);
     assert.equal(Object.hasOwn(listedRoom, "passcodeHash"), false);
     assert.equal(listedRoom.participants[0].user.name, "Study owner");
     assert.deepEqual(Object.keys(listedRoom.participants[0].user).sort(), ["avatar", "id", "name"]);
@@ -444,7 +451,17 @@ test("product routes enforce authentication and persist owner-scoped habits and 
         })
     });
     assert.equal(createdPrivateRoom.status, 201);
-    assert.equal(Object.hasOwn((await createdPrivateRoom.json()).room, "passcodeHash"), false);
+    const privateRoomData = (await createdPrivateRoom.json()).room;
+    assert.match(privateRoomData.inviteCode, /^[0-9a-f]{8}$/);
+    assert.equal(Object.hasOwn(privateRoomData, "passcodeHash"), false);
+
+    const createdPublicRoom = await fetch(`${started.baseUrl}/api/study-rooms`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: "Public room", topic: "Study" })
+    });
+    assert.equal(createdPublicRoom.status, 201);
+    assert.equal((await createdPublicRoom.json()).room.inviteCode, null);
 
     const invalidCapacity = await fetch(`${started.baseUrl}/api/study-rooms`, {
         method: "POST",
@@ -542,4 +559,102 @@ test("product routes reject malformed resource IDs and invalid query/body shapes
         body: JSON.stringify({ passcode: "x".repeat(65) })
     });
     assert.equal(invalidPasscode.status, 400);
+});
+
+test("study room invite codes join members and return room details", async (t) => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const inviteCode = "a1b2c3d4";
+    process.env.JWT_SECRET = "taskora-product-route-test-secret-at-least-32";
+    const token = jwt.sign({}, process.env.JWT_SECRET, {
+        algorithm: "HS256",
+        audience: JWT_AUDIENCE,
+        issuer: JWT_ISSUER,
+        subject: userId,
+        expiresIn: "1h"
+    });
+    const room = {
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "Invite room",
+        topic: "Revision",
+        isPrivate: true,
+        inviteCode,
+        passcodeHash: "must-not-be-returned",
+        maxParticipants: 2
+    };
+    const participants = [];
+    const tx = {
+        studyRoom: {
+            findUnique: async ({ where }) => {
+                if (where.inviteCode && where.inviteCode !== inviteCode) return null;
+                if (where.id && where.id !== room.id) return null;
+                return {
+                    ...room,
+                    participants: participants.map((participant) => ({
+                        ...participant,
+                        user: { id: participant.userId, name: "Study member", avatar: null }
+                    })),
+                    messages: []
+                };
+            }
+        },
+        roomParticipant: {
+            findUnique: async ({ where }) => participants.find((participant) =>
+                participant.roomId === where.roomId_userId.roomId &&
+                participant.userId === where.roomId_userId.userId
+            ) || null,
+            count: async () => participants.length,
+            upsert: async ({ create, update }) => {
+                const existing = participants.find((participant) =>
+                    participant.roomId === create.roomId && participant.userId === create.userId
+                );
+                if (existing) {
+                    Object.assign(existing, update);
+                    return existing;
+                }
+                const participant = { id: "participant-id", ...create, joinedAt: new Date() };
+                participants.push(participant);
+                return participant;
+            }
+        }
+    };
+    const started = await listen({ $transaction: (callback) => callback(tx) });
+    t.after(() => started.server.close());
+
+    const headers = { authorization: `Bearer ${token}` };
+    const missingRoom = await fetch(
+        `${started.baseUrl}/api/study-rooms/join-invite/deadbeef`,
+        { method: "POST", headers }
+    );
+    assert.equal(missingRoom.status, 404);
+
+    participants.push(
+        { roomId: room.id, userId: "22222222-2222-4222-8222-222222222222" },
+        { roomId: room.id, userId: "33333333-3333-4333-8333-333333333333" }
+    );
+    const fullRoom = await fetch(
+        `${started.baseUrl}/api/study-rooms/join-invite/${inviteCode}`,
+        { method: "POST", headers }
+    );
+    assert.equal(fullRoom.status, 409);
+
+    participants.length = 0;
+    const joined = await fetch(
+        `${started.baseUrl}/api/study-rooms/join-invite/${inviteCode}`,
+        { method: "POST", headers }
+    );
+    assert.equal(joined.status, 200);
+    const payload = await joined.json();
+    assert.equal(payload.joined, true);
+    assert.equal(payload.room.id, room.id);
+    assert.equal(payload.room.name, room.name);
+    assert.equal(payload.room.inviteCode, inviteCode);
+    assert.equal(payload.room.participants.length, 1);
+    assert.equal(payload.room.participants[0].userId, userId);
+    assert.equal("passcodeHash" in payload.room, false);
+
+    const malformedCode = await fetch(
+        `${started.baseUrl}/api/study-rooms/join-invite/not-a-code`,
+        { method: "POST", headers }
+    );
+    assert.equal(malformedCode.status, 404);
 });

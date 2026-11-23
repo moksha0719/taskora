@@ -3,10 +3,10 @@
 The backend is a Node.js 22 and Express API using PostgreSQL through Prisma.
 It provides JWT authentication, task and Study Planner APIs, flashcard decks,
 focus sessions, persisted study-room timers, notifications, and server-side
-Gemini-backed Assistant and Brain Dump endpoints. The
+Gemini-backed Assistant endpoints. The
 notification scheduler runs inside each backend process; notifications are
 in-app only. The frontend is connected to the authentication, task, study
-planner, flashcard, focus, study-room, AI/Brain Dump, notification and product
+planner, flashcard, focus, study-room, AI, notification and product
 persistence APIs. Theme and dashboard preferences remain browser-local.
 
 ## Requirements
@@ -61,7 +61,7 @@ the PostgreSQL variables above.
 
 | Service | Purpose | Configuration/status |
 | --- | --- | --- |
-| Google Gemini | AI Assistant and Brain Dump processing. | `GEMINI_API_KEY` and `GEMINI_MODEL` are required when those endpoints are used. Requests have a 20-second timeout; missing credentials produce a safe service-unavailable response. |
+| Google Gemini | AI Assistant. | `GEMINI_API_KEY` and `GEMINI_MODEL` are required when those endpoints are used. Requests have a 20-second timeout; missing credentials produce a safe service-unavailable response. |
 | Resend email API | Password-reset email delivery. | Optional for local use; configure `EMAIL_PROVIDER=resend`, `EMAIL_API_KEY`, verified `EMAIL_FROM`, `EMAIL_FROM_NAME`, and `PASSWORD_RESET_URL` to enable real delivery. |
 | Custom email webhook | Backward-compatible password-reset handoff to an existing mail service. | Select `EMAIL_PROVIDER=webhook` and configure `PASSWORD_RESET_DELIVERY_URL`; optional authorization and HMAC signing are supported. |
 | In-app notifications | Task and study reminders displayed in Taskora. | Persisted in PostgreSQL and scheduled by the backend; email/push delivery is not implemented. |
@@ -201,8 +201,8 @@ Do not manually override `TASKORA_TEST_DATABASE_URL` when using these scripts.
 
 `postgresPersistence.test.js` covers persistence and ownership for users,
 tasks, study plans, schedules, completions, and notifications.
-`task3Task4Persistence.test.js` covers AI conversation/proposal and Brain Dump
-persistence, task category/tags/subtasks and account-deletion behavior,
+`task3Task4Persistence.test.js` covers AI conversation/proposal persistence,
+task category/tags/subtasks and account-deletion behavior,
 migration structure, and transactional rollback cases.
 
 Troubleshooting:
@@ -323,8 +323,8 @@ responses are documented in:
 - [Backend API Contract](../docs/backend-api-contract.md)
 - [Phase 06 Study Planner API Contract](../docs/phase06-api-contract.md)
 
-The current APIs cover authentication, task CRUD, AI Assistant, Brain Dump,
-Study Planner, notifications, and health checks. Study schedule generation
+The current APIs cover authentication, task CRUD, AI Assistant, Study Planner,
+notifications, and health checks. Study schedule generation
 at `POST /api/study-plans/generate` returns a preview and does not save it.
 Persisting the schedule is a separate
 `PUT /api/study-plans/:id/schedule` operation.
@@ -388,8 +388,8 @@ and returns at most 100 records per page by default. Its page is limited to
 
 Rate limits are per IP for registration/login (10 requests per 15 minutes),
 and per authenticated user for AI Assistant/conversation messages (10 per
-15 minutes), Brain Dump processing/creation (5 per 15 minutes), and conversation
-creation/proposal decisions (30 combined per 15 minutes). These use the
+15 minutes) and conversation creation/proposal decisions (30 combined per
+15 minutes). These use the
 express-rate-limit in-memory store: counts are per backend process and reset
 when it restarts; replicas do not share counters. Express does not trust
 forwarded IP headers by default, so place a correctly configured trusted proxy

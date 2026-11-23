@@ -53,6 +53,30 @@ test("Gemini service calls the configured model through the injected client", as
     });
 });
 
+test("Gemini service forwards JSON response configuration to the model", async () => {
+    let receivedRequest;
+    const service = createGeminiService({
+        configProvider: () => ({ apiKey: "test-api-key", model: "gemini-test-model" }),
+        clientFactory: () => ({
+            models: {
+                generateContent: async (request) => {
+                    receivedRequest = request;
+                    return { text: "{\"response\":\"Done\",\"proposals\":[]}" };
+                }
+            }
+        })
+    });
+
+    await service.generateContent("Return structured output", {
+        responseMimeType: "application/json"
+    });
+    assert.deepEqual(receivedRequest, {
+        model: "gemini-test-model",
+        contents: "Return structured output",
+        config: { responseMimeType: "application/json" }
+    });
+});
+
 test("Gemini service maps configuration and provider failures to generic errors", async () => {
     const missingConfigService = createGeminiService({
         configProvider: () => {

@@ -1,25 +1,28 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { DashboardWidgetConfig } from '../../types';
-import { dashboardApi } from '../../lib/api/client';
-import { ArrowUp, ArrowDown, Eye, EyeOff, RotateCcw } from 'lucide-react';
+import { ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
 import { DEFAULT_DASHBOARD_WIDGETS } from '../../lib/defaults';
 
 interface WidgetCustomizeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  widgets: DashboardWidgetConfig[];
   onLayoutUpdated: (widgets: DashboardWidgetConfig[]) => void;
 }
 
 export const WidgetCustomizeModal: React.FC<WidgetCustomizeModalProps> = ({
   isOpen,
   onClose,
+  widgets: currentWidgets,
   onLayoutUpdated,
 }) => {
-  const [widgets, setWidgets] = useState<DashboardWidgetConfig[]>(() =>
-    dashboardApi.getWidgets()
-  );
+  const [widgets, setWidgets] = useState<DashboardWidgetConfig[]>(currentWidgets);
+
+  useEffect(() => {
+    if (isOpen) setWidgets(currentWidgets);
+  }, [currentWidgets, isOpen]);
 
   const toggleWidget = (id: string) => {
     setWidgets((prev) =>
@@ -36,19 +39,19 @@ export const WidgetCustomizeModal: React.FC<WidgetCustomizeModalProps> = ({
     newWidgets[index] = newWidgets[targetIndex];
     newWidgets[targetIndex] = temp;
 
-    setWidgets(newWidgets);
+    setWidgets(newWidgets.map((widget, widgetIndex) => ({
+      ...widget,
+      order: widgetIndex + 1,
+    })));
   };
 
   const handleSave = () => {
-    dashboardApi.saveWidgets(widgets);
     onLayoutUpdated(widgets);
     onClose();
   };
 
   const handleReset = () => {
-    setWidgets(DEFAULT_DASHBOARD_WIDGETS);
-    dashboardApi.saveWidgets(DEFAULT_DASHBOARD_WIDGETS);
-    onLayoutUpdated(DEFAULT_DASHBOARD_WIDGETS);
+    setWidgets(DEFAULT_DASHBOARD_WIDGETS.map((widget) => ({ ...widget })));
   };
 
   return (
@@ -66,22 +69,13 @@ export const WidgetCustomizeModal: React.FC<WidgetCustomizeModalProps> = ({
             className="flex items-center justify-between p-3 rounded-2xl bg-primary-subtle/30 dark:bg-[#1E163B] border border-subtle"
           >
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => toggleWidget(widget.id)}
-                className={`p-2 rounded-xl transition-colors ${
-                  widget.enabled
-                    ? 'bg-primary text-white shadow-xs'
-                    : 'bg-muted-purple/20 text-muted-purple'
-                }`}
-                title={widget.enabled ? 'Disable widget' : 'Enable widget'}
-              >
-                {widget.enabled ? (
-                  <Eye className="w-4 h-4" />
-                ) : (
-                  <EyeOff className="w-4 h-4" />
-                )}
-              </button>
+              <input
+                type="checkbox"
+                checked={widget.enabled}
+                onChange={() => toggleWidget(widget.id)}
+                aria-label={`Show ${widget.title}`}
+                className="h-4 w-4 accent-primary"
+              />
               <span
                 className={`text-xs font-semibold ${
                   widget.enabled

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { StatCard } from '../components/common/StatCard';
+import React, { useState } from 'react';
+import { DashboardStatsRow } from '../components/dashboard/DashboardStatsRow';
 import { ProductivityChart } from '../components/dashboard/ProductivityChart';
 import { TodoWidget } from '../components/dashboard/TodoWidget';
 import { RecentActivityWidget } from '../components/dashboard/RecentActivityWidget';
@@ -7,37 +7,15 @@ import { BunnyMotivationCard } from '../components/dashboard/BunnyMotivationCard
 import { WidgetCustomizeModal } from '../components/dashboard/WidgetCustomizeModal';
 import { SemesterCalendarWidget } from '../components/dashboard/SemesterCalendarWidget';
 import { PomodoroWidget } from '../components/dashboard/PomodoroWidget';
-import { FlashcardWidget } from '../components/dashboard/FlashcardWidget';
-import { ExamPrepWidget } from '../components/dashboard/ExamPrepWidget';
-import { StudyChecklistWidget } from '../components/dashboard/StudyChecklistWidget';
+import { StudyPlanWidget } from '../components/dashboard/StudyPlanWidget';
 import { Modal } from '../components/common/Modal';
 import { Button } from '../components/common/Button';
 import {
-  CheckSquare,
-  Calendar,
-  Flag,
-  Star,
   SlidersHorizontal,
-  Plus,
-  Sparkles,
-  Layers,
-  GraduationCap
+  Plus
 } from 'lucide-react';
-import { analyticsApi, dashboardApi, tasksApi } from '../lib/api/client';
-import { DashboardWidgetConfig, Task, TaskPriority } from '../types';
-
-interface DashboardMetrics {
-  completedTasks: number;
-  openTasks: number;
-  totalTasks: number;
-  focusMinutes: number;
-}
-
-function formatFocusMinutes(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return hours ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
-}
+import { dashboardApi, tasksApi } from '../lib/api/client';
+import { DashboardWidgetConfig, TaskPriority } from '../types';
 
 export const DashboardPage: React.FC = () => {
   const [widgets, setWidgets] = useState<DashboardWidgetConfig[]>(() =>
@@ -47,35 +25,7 @@ export const DashboardPage: React.FC = () => {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [createTaskError, setCreateTaskError] = useState<string | null>(null);
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
-
-  const loadDashboardMetrics = useCallback(async () => {
-    setMetricsLoading(true);
-    setMetricsError(null);
-    try {
-      const [tasks, analytics] = await Promise.all([
-        tasksApi.getTasks(),
-        analyticsApi.getAnalytics('7d'),
-      ]);
-      const completedTasks = tasks.filter((task: Task) => task.status === 'completed').length;
-      setMetrics({
-        completedTasks,
-        openTasks: tasks.length - completedTasks,
-        totalTasks: tasks.length,
-        focusMinutes: analytics.focusMinutes,
-      });
-    } catch (cause) {
-      setMetricsError(cause instanceof Error ? cause.message : 'Unable to load dashboard metrics.');
-    } finally {
-      setMetricsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadDashboardMetrics();
-  }, [loadDashboardMetrics]);
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
 
   // New task form state
   const [taskTitle, setTaskTitle] = useState('');
@@ -83,10 +33,12 @@ export const DashboardPage: React.FC = () => {
   const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium');
   const [taskDueDate, setTaskDueDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const isWidgetEnabled = (id: string) => {
-    const found = widgets.find((w) => w.id === id);
-    return found ? found.enabled : true;
+  const handleLayoutUpdated = (updated: DashboardWidgetConfig[]) => {
+    dashboardApi.saveWidgets(updated);
+    setWidgets(updated);
   };
+
+  const isWidgetEnabled = (id: string) => widgets.find((widget) => widget.id === id)?.enabled ?? false;
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,7 +59,7 @@ export const DashboardPage: React.FC = () => {
 
       setTaskTitle('');
       setIsCreateTaskModalOpen(false);
-      await loadDashboardMetrics();
+      setStatsRefreshKey((key) => key + 1);
     } catch (error) {
       setCreateTaskError(error instanceof Error ? error.message : 'Unable to create the task.');
     } finally {
@@ -148,125 +100,47 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ========================================================
-          SECTION 1: PINTEREST REFERENCE STUDY DASHBOARD BOARD
-          Matches the reference layout:
-          Row 1: Semester Calendar | Pomodoro Timer | AI Flashcards
-          Row 2: Exam Preparation | Study Checklist
-          ======================================================== */}
-      {isWidgetEnabled('study_reference_grid') && (
-        <section className="space-y-6">
-          {/* Section banner */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span>Active Study & Focus Stream</span>
-            </h2>
-            <span className="text-xs text-muted-purple font-medium">
-              Your tasks and study plans
-            </span>
-          </div>
-
-          {/* Row 1: Calendar (35%) | Pomodoro (30%) | Flashcards (35%) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-5 md:col-span-1">
-              <SemesterCalendarWidget />
-            </div>
-            <div className="lg:col-span-3 md:col-span-1">
-              <PomodoroWidget />
-            </div>
-            <div className="lg:col-span-4 md:col-span-2">
-              <FlashcardWidget />
-            </div>
-          </div>
-
-          {/* Row 2: Exam Preparation (60%) | Study Checklist (40%) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-7">
-              <ExamPrepWidget />
-            </div>
-            <div className="lg:col-span-5">
-              <StudyChecklistWidget />
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Personal productivity metrics */}
       {isWidgetEnabled('stats_overview') && (
-        <section className="space-y-3 pt-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold font-heading text-deep-purple dark:text-white flex items-center gap-2">
-              <Layers className="w-4 h-4 text-primary" />
-              <span>Performance & Daily Milestones</span>
-            </h2>
-          </div>
-
-          {metricsError && (
-            <div className="flex items-center justify-between gap-3 text-xs text-rose-600" role="alert">
-              <span>{metricsError}</span>
-              <button type="button" className="font-bold" onClick={() => void loadDashboardMetrics()}>
-                Retry
-              </button>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-            <StatCard
-              title="Completed Tasks"
-              value={metricsLoading ? '…' : metrics?.completedTasks ?? '—'}
-              subtitle="All-time total"
-              icon={CheckSquare}
-              variant="purple"
-            />
-            <StatCard
-              title="Open Tasks"
-              value={metricsLoading ? '…' : metrics?.openTasks ?? '—'}
-              subtitle="Current workload"
-              icon={Calendar}
-              variant="pink"
-            />
-            <StatCard
-              title="Total Tasks"
-              value={metricsLoading ? '…' : metrics?.totalTasks ?? '—'}
-              subtitle="In your account"
-              icon={Flag}
-              variant="mint"
-            />
-            <StatCard
-              title="Focus Time (7d)"
-              value={metricsLoading ? '…' : metrics ? formatFocusMinutes(metrics.focusMinutes) : '—'}
-              subtitle="Recorded sessions"
-              icon={Star}
-              variant="peach"
-            />
-          </div>
-        </section>
+        <DashboardStatsRow refreshKey={statsRefreshKey} />
       )}
 
-      {/* ========================================================
-          SECTION 3: PRODUCTIVITY OVERVIEW, ACTIVITY & MASCOT
-          ======================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
-        {/* Left 2 Cols: Productivity Chart & Recent Activity */}
-        <div className="lg:col-span-2 space-y-6">
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
           {isWidgetEnabled('productivity_chart') && <ProductivityChart />}
-          {isWidgetEnabled('recent_activity') && <RecentActivityWidget />}
         </div>
-
-        {/* Right 1 Col: To-Do Widget & Bunny Motivation Card */}
-        <div className="space-y-6">
+        <div>
           {isWidgetEnabled('today_tasks') && (
-            <TodoWidget onOpenCreateModal={() => setIsCreateTaskModalOpen(true)} />
+            <TodoWidget
+              onOpenCreateModal={() => setIsCreateTaskModalOpen(true)}
+              onTasksChanged={() => setStatsRefreshKey((key) => key + 1)}
+              refreshKey={statsRefreshKey}
+            />
+          )}
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {isWidgetEnabled('study_calendar') && <SemesterCalendarWidget />}
+        {isWidgetEnabled('focus_timer') && <PomodoroWidget />}
+        {isWidgetEnabled('study_plan') && <StudyPlanWidget />}
+      </section>
+
+      {(isWidgetEnabled('recent_activity') || isWidgetEnabled('bunny_motivation')) && (
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {isWidgetEnabled('recent_activity') && (
+            <div className="lg:col-span-2">
+              <RecentActivityWidget />
+            </div>
           )}
           {isWidgetEnabled('bunny_motivation') && <BunnyMotivationCard />}
-        </div>
-      </div>
+        </section>
+      )}
 
       <WidgetCustomizeModal
         isOpen={isCustomizeModalOpen}
         onClose={() => setIsCustomizeModalOpen(false)}
-        onLayoutUpdated={(updated) => setWidgets(updated)}
+        widgets={widgets}
+        onLayoutUpdated={handleLayoutUpdated}
       />
 
       {/* Quick Create Task Modal */}

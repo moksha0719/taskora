@@ -359,6 +359,7 @@ model StudyRoom {
   name                  String           @db.VarChar(120)
   topic                 String           @db.VarChar(160)
   isPrivate             Boolean          @default(false)
+  inviteCode            String?          @unique
   passcodeHash          String?
   maxParticipants       Int              @default(8)
   focusDurationMinutes  Int              @default(25)

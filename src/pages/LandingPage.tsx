@@ -191,10 +191,10 @@ export const LandingPage: React.FC = () => {
               1
             </span>
             <h4 className="text-base font-bold text-deep-purple dark:text-white mb-2 font-heading">
-              Brain Dump & AI Structuring
+              AI Task Structuring
             </h4>
             <p className="text-xs text-muted-purple leading-relaxed">
-              Jot messy thoughts into the Brain Dump. One click converts ramblings into actionable prioritized tasks.
+              Use the AI Assistant to break down tasks into actionable, prioritized steps.
             </p>
           </div>
 

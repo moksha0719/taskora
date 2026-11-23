@@ -29,6 +29,10 @@ import {
 import { cn } from '../lib/utils';
 
 const TIME_ZONE = 'Asia/Colombo';
+const MIN_WEEKLY_TARGET_MINUTES = 600;
+const MAX_WEEKLY_TARGET_MINUTES = 2400;
+const STUDY_DAYS_PER_WEEK = [4, 5, 6];
+const MAX_SUBJECTS_PER_PLAN = 12;
 const DAYS: { code: StudyDayCode; label: string }[] = [
   { code: 'MON', label: 'Monday' },
   { code: 'TUE', label: 'Tuesday' },
@@ -92,6 +96,14 @@ function newPlanForm(): PlanForm {
     timeZone: TIME_ZONE,
     subjects: [{ name: '', code: '', color: SUBJECT_COLORS[0], targetMinutesPerWeek: '600' }],
   };
+}
+
+function subjectRowHasInput(subject: PlanSubjectForm): boolean {
+  return Boolean(
+    subject.name.trim()
+    || subject.code.trim()
+    || subject.targetMinutesPerWeek.trim()
+  );
 }
 
 function emptyAvailability(): AvailabilityForm {
@@ -263,22 +275,26 @@ export const StudyPlannerPage: React.FC = () => {
   }, [completionDate, handleApiError, planId]);
 
   const persistedSchedule = useMemo(() => plan ? scheduleItemsFor(plan) : [], [plan]);
-  const subjectTargetTotal = planForm.subjects.reduce(
+  const planSubjects = planForm.subjects.filter(subjectRowHasInput);
+  const subjectTargetTotal = planSubjects.reduce(
     (total, subject) => total + (Number(subject.targetMinutesPerWeek) || 0),
     0
   );
   const weeklyTarget = Number(planForm.weeklyTargetMinutes);
+  const studyDaysPerWeek = Number(planForm.studyDaysPerWeek);
   const planFormValid = Boolean(
     planForm.title.trim()
     && planForm.startDate
     && planForm.endDate
-    && weeklyTarget >= 600
-    && weeklyTarget <= 2400
-    && Number.isInteger(weeklyTarget)
-    && [4, 5, 6].includes(Number(planForm.studyDaysPerWeek))
-    && planForm.subjects.length > 0
-    && planForm.subjects.every((subject) =>
+    && Number.isSafeInteger(weeklyTarget)
+    && weeklyTarget >= MIN_WEEKLY_TARGET_MINUTES
+    && weeklyTarget <= MAX_WEEKLY_TARGET_MINUTES
+    && STUDY_DAYS_PER_WEEK.some((days) => days === studyDaysPerWeek)
+    && planSubjects.length > 0
+    && planSubjects.length <= MAX_SUBJECTS_PER_PLAN
+    && planSubjects.every((subject) =>
       subject.name.trim()
+      && subject.code.trim().length <= 32
       && Number.isSafeInteger(Number(subject.targetMinutesPerWeek))
       && Number(subject.targetMinutesPerWeek) > 0
     )
@@ -332,7 +348,7 @@ export const StudyPlannerPage: React.FC = () => {
   const savePlan = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!planFormValid) {
-      setError('Subject weekly targets must add up exactly to the plan weekly target.');
+      setError('Set a weekly target from 600 to 2400 minutes, choose 4, 5, or 6 study days, and make subject targets total the weekly target.');
       return;
     }
 
@@ -342,13 +358,16 @@ export const StudyPlannerPage: React.FC = () => {
       endDate: planForm.endDate,
       timeZone: planForm.timeZone,
       weeklyTargetMinutes: weeklyTarget,
-      studyDaysPerWeek: Number(planForm.studyDaysPerWeek),
-      subjects: planForm.subjects.map((subject): StudyPlanSubjectInput => ({
-        name: subject.name.trim(),
-        code: subject.code.trim(),
-        color: subject.color,
-        targetMinutesPerWeek: Number(subject.targetMinutesPerWeek),
-      })),
+      studyDaysPerWeek,
+      subjects: planSubjects.map((subject): StudyPlanSubjectInput => {
+        const code = subject.code.trim();
+        return {
+          name: subject.name.trim(),
+          ...(code ? { code } : {}),
+          color: subject.color,
+          targetMinutesPerWeek: Number(subject.targetMinutesPerWeek),
+        };
+      }),
     };
 
     setSavingPlan(true);
@@ -867,8 +886,8 @@ export const StudyPlannerPage: React.FC = () => {
               <input
                 required
                 type="number"
-                min={600}
-                max={2400}
+                min={MIN_WEEKLY_TARGET_MINUTES}
+                max={MAX_WEEKLY_TARGET_MINUTES}
                 step={1}
                 value={planForm.weeklyTargetMinutes}
                 onChange={(event) => setPlanForm((current) => ({ ...current, weeklyTargetMinutes: event.target.value }))}
@@ -882,7 +901,7 @@ export const StudyPlannerPage: React.FC = () => {
                 onChange={(event) => setPlanForm((current) => ({ ...current, studyDaysPerWeek: event.target.value }))}
                 className="mt-1 w-full rounded-xl border border-subtle bg-white px-3 py-2 text-sm dark:bg-[#181131] dark:text-white"
               >
-                {[4, 5, 6].map((days) => <option key={days} value={days}>{days} days</option>)}
+                {STUDY_DAYS_PER_WEEK.map((days) => <option key={days} value={days}>{days} days</option>)}
               </select>
             </label>
             <div className="text-xs font-semibold text-deep-purple dark:text-lavender-200 sm:col-span-2">
@@ -924,7 +943,8 @@ export const StudyPlannerPage: React.FC = () => {
                 <label className="text-[11px] font-semibold text-muted-purple">
                   Name
                   <input
-                    required
+                    required={subjectRowHasInput(subject)}
+                    maxLength={120}
                     value={subject.name}
                     onChange={(event) => setPlanForm((current) => ({
                       ...current,
@@ -936,6 +956,7 @@ export const StudyPlannerPage: React.FC = () => {
                 <label className="text-[11px] font-semibold text-muted-purple">
                   Code (optional)
                   <input
+                    maxLength={32}
                     value={subject.code}
                     onChange={(event) => setPlanForm((current) => ({
                       ...current,
@@ -959,7 +980,7 @@ export const StudyPlannerPage: React.FC = () => {
                 <label className="text-[11px] font-semibold text-muted-purple">
                   Minutes / week
                   <input
-                    required
+                    required={subjectRowHasInput(subject)}
                     type="number"
                     min={1}
                     step={1}

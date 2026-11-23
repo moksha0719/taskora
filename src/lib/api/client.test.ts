@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { aiApi, analyticsApi, authApi, flashcardsApi, focusApi, roomsApi, STUDY_PLANS_UPDATED_EVENT, studyPlansApi, tasksApi } from './client';
+import { aiApi, analyticsApi, authApi, dashboardApi, flashcardsApi, focusApi, roomsApi, STUDY_PLANS_UPDATED_EVENT, studyPlansApi, tasksApi } from './client';
 import type {
   ApiStudyPlan,
   StudyCompletion,
   StudyPlanInput,
   StudySchedulePreviewItem,
 } from '../../types';
+import { DEFAULT_DASHBOARD_WIDGETS } from '../defaults';
 
 const planInput: StudyPlanInput = {
   title: 'Calendar refresh test',
@@ -43,6 +44,64 @@ describe('study plan calendar refresh notifications', () => {
     window.addEventListener(STUDY_PLANS_UPDATED_EVENT, onUpdated);
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
+  });
+
+  describe('dashboard widget settings', () => {
+    beforeEach(() => {
+      localStorage.removeItem('taskora_dashboard_widgets');
+    });
+
+    it('loads defaults when storage has no usable widget configuration', () => {
+      localStorage.setItem('taskora_dashboard_widgets', '[]');
+
+      expect(dashboardApi.getWidgets()).toEqual(DEFAULT_DASHBOARD_WIDGETS);
+    });
+
+    it('fills in widgets missing from a saved configuration', () => {
+      localStorage.setItem('taskora_dashboard_widgets', JSON.stringify([
+        { id: 'stats_overview', enabled: false },
+      ]));
+
+      const widgets = dashboardApi.getWidgets();
+
+      expect(widgets).toHaveLength(DEFAULT_DASHBOARD_WIDGETS.length);
+      expect(widgets.find((widget) => widget.id === 'stats_overview')?.enabled).toBe(false);
+      expect(widgets.find((widget) => widget.id === 'today_tasks')?.enabled).toBe(true);
+    });
+
+    it('drops the removed study checklist from saved widget settings', () => {
+      localStorage.setItem('taskora_dashboard_widgets', JSON.stringify([
+        { id: 'study_checklist', enabled: true },
+      ]));
+
+      expect(dashboardApi.getWidgets().map((widget) => widget.id)).not.toContain('study_checklist');
+    });
+
+    it('migrates the former study grid visibility to its individual widgets', () => {
+      localStorage.setItem('taskora_dashboard_widgets', JSON.stringify([
+        { id: 'study_reference_grid', enabled: false },
+      ]));
+
+      const widgets = dashboardApi.getWidgets();
+
+      expect(widgets.filter((widget) => [
+        'study_calendar',
+        'focus_timer',
+        'study_plan',
+      ].includes(widget.id)).every((widget) => !widget.enabled)).toBe(true);
+    });
+
+    it('persists widget visibility through localStorage and returns the saved layout', () => {
+      const widgets = DEFAULT_DASHBOARD_WIDGETS.map((widget) => ({
+        ...widget,
+        enabled: widget.id !== 'stats_overview',
+      }));
+
+      dashboardApi.saveWidgets(widgets);
+
+      expect(JSON.parse(localStorage.getItem('taskora_dashboard_widgets') || 'null')).toEqual(widgets);
+      expect(dashboardApi.getWidgets()).toEqual(widgets);
+    });
   });
 
   describe('AI conversation persistence', () => {
@@ -194,6 +253,23 @@ describe('study plan calendar refresh notifications', () => {
     expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
   });
 
+  it('supports paginated study-plan completion history', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ completions: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(studyPlansApi.getCompletions(
+      plan.id,
+      '2026-11-17',
+      '2026-11-18',
+      { page: 2, limit: 100 },
+    )).resolves.toEqual([]);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('page=2&limit=100');
+  });
+
   it('saves a generated schedule to its plan and notifies calendar views', async () => {
     const schedule: StudySchedulePreviewItem[] = [{
       subjectId: '550e8400-e29b-41d4-a716-446655440004',
@@ -333,6 +409,45 @@ describe('study plan calendar refresh notifications', () => {
     }]);
   });
 
+  it('joins a private study room by invite code and maps its returned details', async () => {
+    const user = { id: 'participant-1', name: 'Current user', avatar: null };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      joined: true,
+      room: {
+        id: 'room-1',
+        ownerId: 'owner-1',
+        name: 'Private study group',
+        topic: 'Revision',
+        isPrivate: true,
+        inviteCode: 'a1b2c3d4',
+        maxParticipants: 8,
+        participants: [{
+          userId: user.id,
+          user,
+          status: 'focusing',
+          joinedAt: '2026-11-20T08:00:00.000Z',
+        }],
+        messages: [],
+        focusDurationMinutes: 25,
+        breakDurationMinutes: 5,
+        currentMode: 'FOCUS',
+        timerRemainingSeconds: 900,
+        timerStartedAt: null,
+        createdAt: '2026-11-20T08:00:00.000Z',
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await expect(roomsApi.joinRoomByInviteCode('a1b2c3d4')).resolves.toMatchObject({
+      id: 'room-1',
+      inviteCode: 'a1b2c3d4',
+      participants: [{ id: user.id, name: user.name }],
+    });
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/study-rooms/join-invite/a1b2c3d4');
+    expect(options.method).toBe('POST');
+  });
+
   it('uploads profile photos as image bytes and stores the backend avatar URL', async () => {
     localStorage.setItem('taskora_current_user', JSON.stringify({
       id: '550e8400-e29b-41d4-a716-446655440001',
@@ -432,7 +547,7 @@ describe('study plan calendar refresh notifications', () => {
     expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
   });
 
-  it('sends assistant messages through the authenticated assistant endpoint', async () => {
+  it('sends and persists assistant messages with only the message field', async () => {
     sessionStorage.setItem('taskora_ai_conversation_id', 'conversation-1');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       conversationId: 'conversation-1',
@@ -454,12 +569,9 @@ describe('study plan calendar refresh notifications', () => {
     });
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(new URL(url).pathname).toBe('/api/ai/assistant');
+    expect(new URL(url).pathname).toBe('/api/ai/conversations/conversation-1/messages');
     expect(options.method).toBe('POST');
-    expect(JSON.parse(String(options.body))).toEqual({
-      message: 'Help me plan',
-      conversationId: 'conversation-1',
-    });
+    expect(JSON.parse(String(options.body))).toEqual({ message: 'Help me plan' });
     expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
   });
 

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudyPlannerPage } from './StudyPlannerPage';
@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   getPlans: vi.fn(),
   getActivePlan: vi.fn(),
   getCompletions: vi.fn(),
+  createPlan: vi.fn(),
 }));
 
 const auth = vi.hoisted(() => ({ logout: vi.fn() }));
@@ -25,6 +26,7 @@ vi.mock('../lib/api/client', async (importOriginal) => {
       getPlans: api.getPlans,
       getActivePlan: api.getActivePlan,
       getCompletions: api.getCompletions,
+      createPlan: api.createPlan,
     },
   };
 });
@@ -51,6 +53,7 @@ describe('StudyPlannerPage', () => {
     api.getPlans.mockReset().mockResolvedValue([plan]);
     api.getActivePlan.mockReset().mockResolvedValue(plan);
     api.getCompletions.mockReset().mockResolvedValue([]);
+    api.createPlan.mockReset().mockResolvedValue(plan);
     auth.logout.mockReset();
   });
 
@@ -66,5 +69,46 @@ describe('StudyPlannerPage', () => {
     expect(screen.getByText(`Next session: ${formattedDate}`)).toBeInTheDocument();
     expect(api.getPlans).toHaveBeenCalledOnce();
     expect(api.getActivePlan).toHaveBeenCalledOnce();
+  });
+
+  it('omits empty optional subject fields and filters completely blank subject rows', async () => {
+    render(<MemoryRouter><StudyPlannerPage /></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'Saved study plan' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New plan' }));
+    fireEvent.change(screen.getByLabelText('Plan title'), { target: { value: 'Exam preparation' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Distributed Systems' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add subject' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+
+    await waitFor(() => expect(api.createPlan).toHaveBeenCalledOnce());
+    const submitted = api.createPlan.mock.calls[0][0];
+    expect(submitted.weeklyTargetMinutes).toBe(600);
+    expect(submitted.studyDaysPerWeek).toBe(4);
+    expect(submitted.subjects).toHaveLength(1);
+    expect(submitted.subjects[0]).toMatchObject({
+      name: 'Distributed Systems',
+      targetMinutesPerWeek: 600,
+    });
+    expect(submitted.subjects[0]).not.toHaveProperty('code');
+  });
+
+  it('accepts the backend weekly-target maximum with a supported study-day count', async () => {
+    render(<MemoryRouter><StudyPlannerPage /></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'Saved study plan' });
+    fireEvent.click(screen.getByRole('button', { name: 'New plan' }));
+    fireEvent.change(screen.getByLabelText('Plan title'), { target: { value: 'Exam preparation' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Distributed Systems' } });
+    fireEvent.change(screen.getByLabelText('Weekly target (minutes)'), { target: { value: '2400' } });
+    fireEvent.change(screen.getByLabelText('Study days per week'), { target: { value: '6' } });
+    fireEvent.change(screen.getByLabelText('Minutes / week'), { target: { value: '2400' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+
+    await waitFor(() => expect(api.createPlan).toHaveBeenCalledOnce());
+    expect(api.createPlan.mock.calls[0][0]).toMatchObject({
+      weeklyTargetMinutes: 2400,
+      studyDaysPerWeek: 6,
+      subjects: [{ targetMinutesPerWeek: 2400 }],
+    });
   });
 });

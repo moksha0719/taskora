@@ -1,89 +1,99 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { DEFAULT_DASHBOARD_WIDGETS } from '../lib/defaults';
 import { DashboardPage } from './DashboardPage';
 
 const api = vi.hoisted(() => ({
-  getTasks: vi.fn(),
   createTask: vi.fn(),
-  getAnalytics: vi.fn(),
   getWidgets: vi.fn(),
   saveWidgets: vi.fn(),
 }));
 
 vi.mock('../lib/api/client', () => ({
-  tasksApi: { getTasks: api.getTasks, createTask: api.createTask },
-  analyticsApi: { getAnalytics: api.getAnalytics },
+  tasksApi: { createTask: api.createTask },
   dashboardApi: { getWidgets: api.getWidgets, saveWidgets: api.saveWidgets },
 }));
 
-vi.mock('../components/dashboard/ProductivityChart', () => ({ ProductivityChart: () => null }));
-vi.mock('../components/dashboard/TodoWidget', () => ({ TodoWidget: () => null }));
+vi.mock('../components/dashboard/DashboardStatsRow', () => ({
+  DashboardStatsRow: () => <div>Dashboard Stats Row</div>,
+}));
+vi.mock('../components/dashboard/ProductivityChart', () => ({
+  ProductivityChart: () => <div>Productivity Chart</div>,
+}));
+vi.mock('../components/dashboard/TodoWidget', () => ({
+  TodoWidget: () => <div>To-Do List</div>,
+}));
 vi.mock('../components/dashboard/RecentActivityWidget', () => ({ RecentActivityWidget: () => null }));
 vi.mock('../components/dashboard/BunnyMotivationCard', () => ({ BunnyMotivationCard: () => null }));
-vi.mock('../components/dashboard/WidgetCustomizeModal', () => ({ WidgetCustomizeModal: () => null }));
-vi.mock('../components/dashboard/SemesterCalendarWidget', () => ({ SemesterCalendarWidget: () => null }));
-vi.mock('../components/dashboard/PomodoroWidget', () => ({ PomodoroWidget: () => null }));
-vi.mock('../components/dashboard/FlashcardWidget', () => ({ FlashcardWidget: () => null }));
-vi.mock('../components/dashboard/ExamPrepWidget', () => ({ ExamPrepWidget: () => null }));
-vi.mock('../components/dashboard/StudyChecklistWidget', () => ({ StudyChecklistWidget: () => null }));
+vi.mock('../components/dashboard/SemesterCalendarWidget', () => ({
+  SemesterCalendarWidget: () => <div>Calendar Widget</div>,
+}));
+vi.mock('../components/dashboard/PomodoroWidget', () => ({
+  PomodoroWidget: () => <div>Focus Timer Widget</div>,
+}));
+vi.mock('../components/dashboard/StudyPlanWidget', () => ({
+  StudyPlanWidget: () => <div>Study Plan Widget</div>,
+}));
 
 describe('DashboardPage', () => {
   beforeEach(() => {
-    api.getTasks.mockReset();
     api.createTask.mockReset();
-    api.getAnalytics.mockReset();
-    api.getWidgets.mockReset().mockReturnValue([]);
+    api.getWidgets.mockReset().mockReturnValue(
+      DEFAULT_DASHBOARD_WIDGETS.map((widget) => ({ ...widget })),
+    );
     api.saveWidgets.mockReset();
   });
 
-  it('shows task and focus totals returned by the authenticated APIs', async () => {
-    api.getTasks.mockResolvedValue([
-      { id: 'task-1', status: 'completed' },
-      { id: 'task-2', status: 'in_progress' },
-      { id: 'task-3', status: 'todo' },
-    ]);
-    api.getAnalytics.mockResolvedValue({ focusMinutes: 95 });
+  it('shows the KPI, chart, task, and requested bottom widgets without a study checklist', () => {
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
 
-    render(<DashboardPage />);
+    expect(screen.getByText('Dashboard Stats Row')).toBeInTheDocument();
+    expect(screen.getByText('Productivity Chart')).toBeInTheDocument();
+    expect(screen.getByText('To-Do List')).toBeInTheDocument();
+    expect(screen.getByText('Calendar Widget')).toBeInTheDocument();
+    expect(screen.getByText('Focus Timer Widget')).toBeInTheDocument();
+    expect(screen.getByText('Study Plan Widget')).toBeInTheDocument();
+    expect(DEFAULT_DASHBOARD_WIDGETS.map((widget) => widget.id)).not.toContain('study_checklist');
 
-    await waitFor(() => expect(
-      screen.getByText('Completed Tasks').parentElement?.querySelector('.text-2xl')?.textContent
-    ).toBe('1'));
-    expect(screen.getByText('Open Tasks').parentElement?.querySelector('.text-2xl')?.textContent).toBe('2');
-    expect(screen.getByText('Total Tasks').parentElement?.querySelector('.text-2xl')?.textContent).toBe('3');
-    expect(screen.getByText('Focus Time (7d)').parentElement?.querySelector('.text-2xl')?.textContent).toBe('1h 35m');
-    expect(api.getAnalytics).toHaveBeenCalledWith('7d');
-  });
-
-  it('shows zero values when the authenticated account has no records', async () => {
-    api.getTasks.mockResolvedValue([]);
-    api.getAnalytics.mockResolvedValue({ focusMinutes: 0 });
-
-    render(<DashboardPage />);
-
-    await waitFor(() => expect(
-      screen.getByText('Total Tasks').parentElement?.querySelector('.text-2xl')?.textContent
-    ).toBe('0'));
-    expect(screen.getByText('Completed Tasks').parentElement?.querySelector('.text-2xl')?.textContent).toBe('0');
-    expect(screen.getByText('Open Tasks').parentElement?.querySelector('.text-2xl')?.textContent).toBe('0');
-    expect(screen.getByText('Focus Time (7d)').parentElement?.querySelector('.text-2xl')?.textContent).toBe('0m');
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Widgets' }));
+    expect(screen.queryByRole('checkbox', { name: 'Show Study Checklist' })).not.toBeInTheDocument();
   });
 
   it('shows an inline error and preserves the task when quick creation fails', async () => {
-    api.getTasks.mockResolvedValue([]);
-    api.getAnalytics.mockResolvedValue({ focusMinutes: 0 });
     api.createTask.mockRejectedValueOnce(new Error('Task could not be saved.'));
-    render(<DashboardPage />);
-    await waitFor(() => expect(
-      screen.getByText('Total Tasks').parentElement?.querySelector('.text-2xl')?.textContent
-    ).toBe('0'));
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('button', { name: 'New Task' }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Review lecture notes' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Implement Raft heartbeat interval ⏱️'), {
+      target: { value: 'Review lecture notes' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Task could not be saved.');
-    expect(screen.getByRole('textbox')).toHaveValue('Review lecture notes');
+    expect(screen.getByPlaceholderText('e.g. Implement Raft heartbeat interval ⏱️'))
+      .toHaveValue('Review lecture notes');
     expect(api.createTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the study plan by default and removes it when disabled', async () => {
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+
+    expect(screen.getByText('Study Plan Widget')).toBeInTheDocument();
+    expect(DEFAULT_DASHBOARD_WIDGETS.map((widget) => widget.id)).not.toContain('flashcards');
+    expect(DEFAULT_DASHBOARD_WIDGETS.map((widget) => widget.id)).not.toContain('ai_assistant');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Widgets' }));
+    const studyPlanCheckbox = screen.getByRole('checkbox', { name: 'Show Study Plan' });
+    expect(studyPlanCheckbox).toBeChecked();
+    fireEvent.click(studyPlanCheckbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Layout' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Study Plan Widget')).not.toBeInTheDocument();
+    });
+    expect(api.saveWidgets).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'study_plan', enabled: false })]),
+    );
   });
 });

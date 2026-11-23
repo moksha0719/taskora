@@ -333,73 +333,6 @@ cross-user resources return `404`; expired or already resolved proposals return
 `409`. Provider configuration, timeout, rate limit, and other provider errors
 use `503`, `504`, `429`, and `502` respectively.
 
-## Brain Dump
-
-### `POST /api/brain-dumps/process`
-
-Protected. Accepts only a non-empty `text` string up to 8,000 characters:
-
-```json
-{ "text": "Biology exam next week; review cell structure and make flashcards." }
-```
-
-The endpoint asks the configured AI service to organize the text and validates
-the result. It does not save a Brain Dump entry or create tasks. Success (`200`):
-
-```json
-{
-  "summary": "Prepare for the biology exam.",
-  "tasks": [
-    {
-      "title": "Review cell structure",
-      "description": "Use the class notes.",
-      "priority": "HIGH",
-      "dueDate": "2026-12-01"
-    }
-  ]
-}
-```
-
-The summary must be non-empty and at most 500 characters. There can be at most
-20 proposed tasks; each has a non-empty title up to 120 characters and priority
-`LOW`, `MEDIUM`, or `HIGH`. Optional description is non-empty and at most 1,000
-characters; optional due date is a valid ISO date or date-time. Invalid input
-returns `400`; invalid AI output returns `502`; configuration, provider, rate
-limit, and timeout errors return `503`, `502`, `429`, and `504`. Each
-authenticated user is limited to 5 requests per 15-minute window (`429` with
-`{"error":"Too many Brain Dump requests. Please try again later."}`). The
-limiter uses the process's in-memory default store.
-
-Validation error examples are `"A JSON object is required"`,
-`"Only the text field is accepted"`, `"Text must be a non-empty string"`, and
-`"Text must be 8000 characters or fewer"`. If the generated result is
-malformed or violates the described output schema, the endpoint returns
-`502` with `{"error":"AI returned an invalid response"}`.
-
-### Persisted Brain Dumps and task review
-
-The stateless `/process` preview above remains available. Persisted Brain Dump
-workflows use these protected, owner-scoped endpoints:
-
-| Method | Path | Success |
-| --- | --- | --- |
-| `POST` | `/api/brain-dumps` | `201`, `{ "brainDump": ... }` |
-| `GET` | `/api/brain-dumps` | `200`, `{ "brainDumps": [...] }` |
-| `GET` | `/api/brain-dumps/:brainDumpId` | `200`, `{ "brainDump": ... }` |
-| `POST` | `/api/brain-dumps/:brainDumpId/proposals/:proposalId/approve` | `200`, `{ "proposal": ..., "task": ... }` |
-| `POST` | `/api/brain-dumps/:brainDumpId/proposals/:proposalId/reject` | `200`, the updated proposal |
-
-`POST /api/brain-dumps` accepts the same `{ "text": "..." }` body and 8,000
-character limit as `/process`, and shares the same per-user 5-per-15-minute
-Brain Dump limit. It stores the original text, validated summary,
-and validated task proposals. Proposals start as `PENDING`; tasks are created
-only after explicit approval. Approval revalidates title, description,
-priority, and due date, and creates the task transactionally through the task
-service. Rejection and approval are single-use decisions. The list returns at
-most 50 newest records. Missing or cross-user records return `404`; invalid
-inputs return `400`; already resolved proposals return `409`. AI provider and
-output errors retain the safe status mappings documented for `/process`.
-
 ## Study Planner and Notifications
 
 Study Planner endpoints cover plan CRUD, stateless schedule preview, saving a
@@ -467,9 +400,11 @@ Client-submitted XP amounts and arbitrary XP writes are not accepted.
 
 ### Study rooms, gamification, analytics, search, and administration
 
-Study rooms are available through `/api/study-rooms`; joining private rooms
-requires the passcode. `GET /api/study-rooms/:id/events` is an authenticated
-member-only SSE stream. Room event delivery is process-local.
+Study rooms are available through `/api/study-rooms`; `GET /api/study-rooms`
+lists public rooms only. Creating a private room generates an eight-character
+invite code; `POST /api/study-rooms/join-invite/:inviteCode` joins by that code
+and returns the room details. `GET /api/study-rooms/:id/events` is an
+authenticated member-only SSE stream. Room event delivery is process-local.
 
 `GET /api/gamification` derives achievement progress and XP from persisted
 records. There is no client-write XP endpoint. `GET /api/analytics` supports
@@ -483,7 +418,7 @@ role-management API is currently provided.
 ## Frontend integration status
 
 The frontend API client is now backend-backed for authentication, tasks,
-Study Planner/calendar operations, AI conversations, persisted Brain Dumps,
+Study Planner/calendar operations, AI conversations,
 notifications, habits, notes, focus sessions, study rooms, gamification
 summaries, analytics and unified search. Browser `localStorage` remains only
 for theme/dashboard preference fallbacks and legacy compatibility data.

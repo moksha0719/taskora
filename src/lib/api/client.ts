@@ -1,5 +1,5 @@
 import {
-  User, Task, TaskPriority, TaskStatus, Habit, StudyNote, BrainDumpEntry,
+  User, Task, TaskPriority, TaskStatus, Habit, StudyNote,
   StudyRoom, Achievement, XPTransaction, NotificationItem,
   ThemeConfig, DashboardWidgetConfig, AdminStats, ModerationReport,
   AuditLogEntry, AIProposal, ChatMessage, FocusSession, ApiStudyPlan,
@@ -447,8 +447,15 @@ export const studyPlansApi = {
     return studyPlan;
   },
 
-  async getCompletions(planId: string, from: string, to: string): Promise<StudyCompletion[]> {
+  async getCompletions(
+    planId: string,
+    from: string,
+    to: string,
+    pagination?: { page?: number; limit?: number },
+  ): Promise<StudyCompletion[]> {
     const query = new URLSearchParams({ from, to });
+    if (pagination?.page !== undefined) query.set('page', String(pagination.page));
+    if (pagination?.limit !== undefined) query.set('limit', String(pagination.limit));
     const { completions } = await requestApi<{ completions: StudyCompletion[] }>(
       `/api/study-plans/${encodeURIComponent(planId)}/completions?${query}`
     );
@@ -559,8 +566,7 @@ async function fetchAIConversations(): Promise<AIConversationSummary[]> {
 }
 
 function mapBackendProposal(
-  proposal: { id: string; payload?: { title?: string; description?: string; priority?: string; dueDate?: string }; title?: string; description?: string | null; priority?: string; dueDate?: string | null; status: string; createdAt: string },
-  source: 'assistant' | 'brain_dump' = 'assistant'
+  proposal: { id: string; payload?: { title?: string; description?: string; priority?: string; dueDate?: string }; title?: string; description?: string | null; priority?: string; dueDate?: string | null; status: string; createdAt: string }
 ): AIProposal {
   const payload = proposal.payload || {};
   const title = payload.title || proposal.title || 'AI proposed task';
@@ -577,8 +583,8 @@ function mapBackendProposal(
           : 'pending';
   return {
     id: proposal.id,
-    type: source === 'brain_dump' ? 'brain_dump_conversion' : 'task_breakdown',
-    title: source === 'brain_dump' ? 'Organized Brain Dump tasks' : 'AI task breakdown',
+    type: 'task_breakdown',
+    title: 'AI task breakdown',
     description: payload.description || proposal.description || 'Review this proposed task before applying it.',
     status,
     items: [{
@@ -593,40 +599,45 @@ function mapBackendProposal(
   };
 }
 
+async function sendAssistantMessage(message: string): Promise<{
+  response: string;
+  assistantMessageId: string;
+  timestamp: string;
+  proposals: AIProposal[];
+}> {
+  let conversationId = getAiConversationId();
+  if (!conversationId) {
+    conversationId = (await aiApi.createConversation()).id;
+  }
+
+  const result = await requestApi<{
+    conversationId: string;
+    assistantMessage: { id: string; content: string; createdAt: string };
+    proposals: Array<{
+      id: string;
+      payload: { title?: string; description?: string; priority?: string; dueDate?: string };
+      status: string;
+      createdAt: string;
+    }>;
+  }>(`/api/ai/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+  setAiConversationId(result.conversationId || conversationId);
+  return {
+    response: result.assistantMessage.content,
+    assistantMessageId: result.assistantMessage.id,
+    timestamp: new Date(result.assistantMessage.createdAt).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    proposals: result.proposals.map((proposal) => mapBackendProposal(proposal)),
+  };
+}
+
 export const aiApi = {
-  async generateAssistantResponse(message: string): Promise<{
-    response: string;
-    assistantMessageId: string;
-    timestamp: string;
-    proposals: AIProposal[];
-  }> {
-    let conversationId = getAiConversationId();
-    if (!conversationId) {
-      conversationId = (await this.createConversation()).id;
-    }
-    const result = await requestApi<{
-      conversationId: string;
-      assistantMessage: { id: string; content: string; createdAt: string };
-      proposals: Array<{
-        id: string;
-        payload: { title?: string; description?: string; priority?: string; dueDate?: string };
-        status: string;
-        createdAt: string;
-      }>;
-    }>('/api/ai/assistant', {
-      method: 'POST',
-      body: JSON.stringify({ message, conversationId }),
-    });
-    setAiConversationId(result.conversationId);
-    return {
-      response: result.assistantMessage.content,
-      assistantMessageId: result.assistantMessage.id,
-      timestamp: new Date(result.assistantMessage.createdAt).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      proposals: result.proposals.map((proposal) => mapBackendProposal(proposal)),
-    };
+  async generateAssistantResponse(message: string) {
+    return sendAssistantMessage(message);
   },
 
   getActiveConversationId(): string | null {
@@ -739,101 +750,7 @@ export const aiApi = {
     timestamp: string;
     proposals: AIProposal[];
   }> {
-    let conversationId = getAiConversationId();
-    if (!conversationId) {
-      const conversation = await this.createConversation();
-      conversationId = conversation.id;
-    }
-    const result = await requestApi<{
-      assistantMessage: { id: string; content: string; createdAt: string };
-      proposals: Array<{ id: string; payload: { title?: string; description?: string; priority?: string; dueDate?: string }; status: string; createdAt: string }>;
-    }>(
-      `/api/ai/conversations/${encodeURIComponent(conversationId)}/messages`,
-      { method: 'POST', body: JSON.stringify({ message: prompt }) }
-    );
-    return {
-      response: result.assistantMessage.content,
-      assistantMessageId: result.assistantMessage.id,
-      timestamp: new Date(result.assistantMessage.createdAt).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      proposals: result.proposals.map((proposal) => mapBackendProposal(proposal)),
-    };
-  },
-};
-
-// ==========================================
-// BRAIN DUMP API (TC08)
-// ==========================================
-export const brainDumpApi = {
-  async getEntries(): Promise<BrainDumpEntry[]> {
-    const { brainDumps } = await requestApi<{ brainDumps: Array<{
-      id: string;
-      userId: string;
-      inputText: string;
-      summary: string;
-      proposals: Array<unknown>;
-      createdAt: string;
-    }> }>('/api/brain-dumps');
-    return brainDumps.map((entry) => ({
-      id: entry.id,
-      userId: entry.userId,
-      rawText: entry.inputText,
-      status: entry.proposals.length > 0 ? 'organized' : 'raw',
-      extractedTaskCount: entry.proposals.length,
-      createdAt: entry.createdAt,
-    }));
-  },
-
-  async addEntry(rawText: string): Promise<BrainDumpEntry> {
-    const { brainDump } = await requestApi<{ brainDump: {
-      id: string;
-      userId: string;
-      inputText: string;
-      proposals: Array<unknown>;
-      createdAt: string;
-    } }>('/api/brain-dumps', {
-      method: 'POST',
-      body: JSON.stringify({ text: rawText }),
-    });
-    return {
-      id: brainDump.id,
-      userId: brainDump.userId,
-      rawText: brainDump.inputText,
-      status: 'organized',
-      extractedTaskCount: brainDump.proposals.length,
-      createdAt: brainDump.createdAt,
-    };
-  },
-
-  async convertToProposal(entryId: string): Promise<AIProposal> {
-    const { brainDump } = await requestApi<{ brainDump: {
-      proposals: Array<{ id: string; title: string; description: string | null; priority: string; dueDate: string | null; status: string; createdAt: string }>;
-    } }>(`/api/brain-dumps/${encodeURIComponent(entryId)}`);
-    if (brainDump.proposals.length === 0) {
-      throw new ApiError('This Brain Dump has no pending proposals.', 404);
-    }
-    return mapBackendProposal(brainDump.proposals[0], 'brain_dump');
-  },
-
-  async approveProposal(brainDumpId: string, proposalId: string): Promise<{ proposal: AIProposal; createdTasks: Task[] }> {
-    const result = await requestApi<{ proposal: { id: string; title: string; description: string | null; priority: string; dueDate: string | null; status: string; createdAt: string }; task: ApiTask }>(
-      `/api/brain-dumps/${encodeURIComponent(brainDumpId)}/proposals/${encodeURIComponent(proposalId)}/approve`,
-      { method: 'POST' }
-    );
-    return {
-      proposal: mapBackendProposal(result.proposal, 'brain_dump'),
-      createdTasks: [toAppTask(result.task)],
-    };
-  },
-
-  async rejectProposal(brainDumpId: string, proposalId: string): Promise<AIProposal> {
-    const { proposal } = await requestApi<{ proposal: { id: string; title: string; description: string | null; priority: string; dueDate: string | null; status: string; createdAt: string } }>(
-      `/api/brain-dumps/${encodeURIComponent(brainDumpId)}/proposals/${encodeURIComponent(proposalId)}/reject`,
-      { method: 'POST' }
-    );
-    return mapBackendProposal(proposal, 'brain_dump');
+    return sendAssistantMessage(prompt);
   },
 };
 
@@ -1042,78 +959,89 @@ export const flashcardsApi = {
 // ==========================================
 // STUDY ROOMS API (TC10)
 // ==========================================
+type ApiStudyRoom = {
+  id: string;
+  ownerId: string;
+  name: string;
+  topic: string;
+  isPrivate: boolean;
+  inviteCode?: string | null;
+  maxParticipants: number;
+  participants: Array<{
+    userId: string;
+    user?: { id: string; name: string; avatar: string | null };
+    status: string;
+    joinedAt: string;
+  }>;
+  messages: Array<{
+    id: string;
+    userId: string;
+    user?: { id: string; name: string; avatar: string | null };
+    content: string;
+    createdAt: string;
+  }>;
+  focusDurationMinutes: number;
+  breakDurationMinutes: number;
+  currentMode: 'FOCUS' | 'BREAK';
+  timerRemainingSeconds: number;
+  timerStartedAt: string | null;
+  createdAt: string;
+};
+
+function mapStudyRoom(room: ApiStudyRoom): StudyRoom {
+  return {
+    id: room.id,
+    ownerId: room.ownerId,
+    name: room.name,
+    topic: room.topic,
+    isPrivate: room.isPrivate,
+    inviteCode: room.inviteCode ?? null,
+    maxParticipants: room.maxParticipants,
+    participants: room.participants.map((participant) => ({
+      id: participant.userId,
+      name: participant.user?.name || 'Unknown user',
+      avatar: resolveAvatarUrl(participant.user?.avatar),
+      status: participant.status === 'break' ? 'break' : participant.status === 'idle' ? 'idle' : 'focusing',
+      joinedAt: participant.joinedAt,
+    })),
+    messages: room.messages.map((message) => ({
+      id: message.id,
+      userId: message.userId,
+      userName: message.user?.name || 'Unknown user',
+      userAvatar: resolveAvatarUrl(message.user?.avatar),
+      content: message.content,
+      timestamp: message.createdAt,
+    })),
+    focusDurationMinutes: room.focusDurationMinutes,
+    breakDurationMinutes: room.breakDurationMinutes,
+    currentMode: room.currentMode === 'BREAK' ? 'break' : 'focus',
+    timerRemainingSeconds: room.timerRemainingSeconds,
+    timerStartedAt: room.timerStartedAt,
+    createdAt: room.createdAt,
+  };
+}
+
 export const roomsApi = {
   async getRooms(): Promise<StudyRoom[]> {
-    const { rooms } = await requestApi<{ rooms: Array<{
-      id: string; ownerId: string; name: string; topic: string; isPrivate: boolean; maxParticipants: number;
-      participants: Array<{ userId: string; user?: { id: string; name: string; avatar: string | null }; status: string; joinedAt: string }>;
-      messages: Array<{ id: string; userId: string; user?: { id: string; name: string; avatar: string | null }; content: string; createdAt: string }>;
-      focusDurationMinutes: number; breakDurationMinutes: number; currentMode: 'FOCUS' | 'BREAK';
-      timerRemainingSeconds: number; timerStartedAt: string | null; createdAt: string;
-    }> }>('/api/study-rooms');
-    return rooms.map((room) => ({
-      id: room.id,
-      ownerId: room.ownerId,
-      name: room.name,
-      topic: room.topic,
-      isPrivate: room.isPrivate,
-      maxParticipants: room.maxParticipants,
-      participants: room.participants.map((participant) => ({
-        id: participant.userId,
-        name: participant.user?.name || 'Unknown user',
-        avatar: resolveAvatarUrl(participant.user?.avatar),
-        status: participant.status === 'break' ? 'break' : participant.status === 'idle' ? 'idle' : 'focusing',
-        joinedAt: participant.joinedAt,
-      })),
-      messages: room.messages.map((message) => ({
-        id: message.id,
-        userId: message.userId,
-        userName: message.user?.name || 'Unknown user',
-        userAvatar: resolveAvatarUrl(message.user?.avatar),
-        content: message.content,
-        timestamp: message.createdAt,
-      })),
-      focusDurationMinutes: room.focusDurationMinutes,
-      breakDurationMinutes: room.breakDurationMinutes,
-      currentMode: room.currentMode === 'BREAK' ? 'break' : 'focus',
-      timerRemainingSeconds: room.timerRemainingSeconds,
-      timerStartedAt: room.timerStartedAt,
-      createdAt: room.createdAt,
-    }));
+    const { rooms } = await requestApi<{ rooms: ApiStudyRoom[] }>('/api/study-rooms');
+    return rooms.map(mapStudyRoom);
   },
 
   async createRoom(data: Partial<StudyRoom>): Promise<StudyRoom> {
-    const { room } = await requestApi<{ room: {
-      id: string; ownerId: string; name: string; topic: string; isPrivate: boolean; maxParticipants: number;
-      participants: Array<{ userId: string; user?: { id: string; name: string; avatar: string | null }; status: string; joinedAt: string }>; messages: Array<unknown>;
-      focusDurationMinutes: number; breakDurationMinutes: number; currentMode: 'FOCUS' | 'BREAK';
-      timerRemainingSeconds: number; timerStartedAt: string | null; createdAt: string;
-    } }>('/api/study-rooms', {
+    const { room } = await requestApi<{ room: ApiStudyRoom }>('/api/study-rooms', {
       method: 'POST',
       body: JSON.stringify(data),
     });
-    return {
-      id: room.id,
-      ownerId: room.ownerId,
-      name: room.name,
-      topic: room.topic,
-      isPrivate: room.isPrivate,
-      maxParticipants: room.maxParticipants,
-      participants: room.participants.map((participant) => ({
-        id: participant.userId,
-        name: participant.user?.name || 'Unknown user',
-        avatar: resolveAvatarUrl(participant.user?.avatar),
-        status: 'focusing',
-        joinedAt: participant.joinedAt,
-      })),
-      messages: [],
-      focusDurationMinutes: room.focusDurationMinutes,
-      breakDurationMinutes: room.breakDurationMinutes,
-      currentMode: room.currentMode === 'BREAK' ? 'break' : 'focus',
-      timerRemainingSeconds: room.timerRemainingSeconds,
-      timerStartedAt: room.timerStartedAt,
-      createdAt: room.createdAt,
-    };
+    return mapStudyRoom(room);
+  },
+
+  // ✅ FIXED: Use this existing method to join via invite link
+  async joinRoomByInviteCode(inviteCode: string): Promise<StudyRoom> {
+    const { room } = await requestApi<{ joined: boolean; room: ApiStudyRoom }>(
+      `/api/study-rooms/join-invite/${encodeURIComponent(inviteCode)}`,
+      { method: 'POST' },
+    );
+    return mapStudyRoom(room);
   },
 
   async updateRoom(roomId: string, updates: {
@@ -1188,7 +1116,6 @@ export const roomsApi = {
     return () => controller.abort();
   },
 };
-
 // ==========================================
 // GAMIFICATION API (TC09)
 // ==========================================
@@ -1253,13 +1180,60 @@ export const themeApi = {
 
 export const dashboardApi = {
   getWidgets(): DashboardWidgetConfig[] {
-    return loadFromStorage<DashboardWidgetConfig[]>('dashboard_widgets', DEFAULT_DASHBOARD_WIDGETS);
+    return normalizeDashboardWidgets(loadFromStorage<unknown>('dashboard_widgets', null));
   },
 
   saveWidgets(widgets: DashboardWidgetConfig[]): void {
-    saveToStorage('dashboard_widgets', widgets);
+    saveToStorage('dashboard_widgets', normalizeDashboardWidgets(widgets));
   },
 };
+
+function normalizeDashboardWidgets(value: unknown): DashboardWidgetConfig[] {
+  const savedWidgets = new Map<string, Partial<DashboardWidgetConfig>>();
+  if (Array.isArray(value)) {
+    value.forEach((item: unknown) => {
+      if (typeof item !== 'object' || item === null || !('id' in item) || typeof item.id !== 'string') return;
+      savedWidgets.set(item.id, item as Partial<DashboardWidgetConfig>);
+    });
+  }
+
+  const orderedIds = Array.isArray(value)
+    ? value.flatMap((item: unknown) => (
+      typeof item === 'object'
+      && item !== null
+      && 'id' in item
+      && typeof item.id === 'string'
+      && DEFAULT_DASHBOARD_WIDGETS.some((widget) => widget.id === item.id)
+        ? [item.id]
+        : []
+    ))
+    : [];
+  const uniqueIds = [...new Set(orderedIds)];
+  DEFAULT_DASHBOARD_WIDGETS.forEach((widget) => {
+    if (!uniqueIds.includes(widget.id)) uniqueIds.push(widget.id);
+  });
+
+  const defaultsById = new Map(DEFAULT_DASHBOARD_WIDGETS.map((widget) => [widget.id, widget]));
+  const legacyStudyGrid = savedWidgets.get('study_reference_grid');
+  const migratedStudyWidgetIds = new Set([
+    'study_calendar',
+    'focus_timer',
+    'study_plan',
+  ]);
+  return uniqueIds.map((id, index) => {
+    const defaultWidget = defaultsById.get(id)!;
+    const savedWidget = savedWidgets.get(id);
+    return {
+      ...defaultWidget,
+      enabled: typeof savedWidget?.enabled === 'boolean'
+        ? savedWidget.enabled
+        : migratedStudyWidgetIds.has(id) && typeof legacyStudyGrid?.enabled === 'boolean'
+          ? legacyStudyGrid.enabled
+          : defaultWidget.enabled,
+      order: index + 1,
+    };
+  });
+}
 
 export const analyticsApi = {
   async getAnalytics(period: '7d' | '30d' | 'semester' = '7d'): Promise<{

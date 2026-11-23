@@ -9,9 +9,12 @@ export const FlashcardWidget: React.FC = () => {
   const [decks, setDecks] = useState<FlashcardDeck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setError(null);
     flashcardsApi.getDecks()
       .then((result) => {
         if (active) setDecks(result);
@@ -25,7 +28,7 @@ export const FlashcardWidget: React.FC = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const cardCount = decks.reduce((total, deck) => total + deck.cardCount, 0);
 
@@ -41,11 +44,26 @@ export const FlashcardWidget: React.FC = () => {
         {loading ? (
           <p role="status" className="text-sm text-muted-purple">Loading flashcards...</p>
         ) : error ? (
-          <p role="alert" className="max-w-xs text-sm text-rose-600">{error}</p>
-        ) : cardCount === 0 ? (
+          <div className="space-y-2">
+            <p role="alert" className="max-w-xs text-sm text-rose-600">{error}</p>
+            <button
+              type="button"
+              onClick={() => setReloadKey((key) => key + 1)}
+              className="text-xs font-bold text-primary hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : decks.length === 0 ? (
           <>
-            <p className="text-sm font-semibold text-deep-purple dark:text-white">No flashcards available</p>
+            <p className="text-sm font-semibold text-deep-purple dark:text-white">No flashcard decks yet</p>
             <p className="mt-1 max-w-xs text-xs text-muted-purple">Create a deck to add and review your own cards.</p>
+            <Link
+              to="/flashcards"
+              className="mt-4 inline-flex items-center gap-1 rounded-full bg-primary px-4 py-2 text-xs font-bold text-white hover:opacity-90"
+            >
+              Create a Deck <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </>
         ) : (
           <>
@@ -55,9 +73,11 @@ export const FlashcardWidget: React.FC = () => {
             <p className="mt-1 max-w-xs text-xs text-muted-purple">Review cards that are due for practice.</p>
           </>
         )}
-        <Link to="/flashcards" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">
-          Open Flashcards <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
+        {!loading && !error && decks.length > 0 && (
+          <Link to="/flashcards" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">
+            Open Flashcards <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
       </div>
     </Card>
   );
