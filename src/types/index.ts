@@ -164,8 +164,7 @@ export interface StudyCompletion {
 export type ProposalType = 
   | 'task_breakdown' 
   | 'study_schedule' 
-  | 'habit_suggestion' 
-  | 'brain_dump_conversion';
+  | 'habit_suggestion';
 
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'modified';
 
@@ -271,16 +270,6 @@ export interface StudyNote {
   createdAt: string;
 }
 
-export interface BrainDumpEntry {
-  id: string;
-  userId: string;
-  rawText: string;
-  status: 'raw' | 'organized' | 'archived';
-  categoryHint?: string;
-  extractedTaskCount?: number;
-  createdAt: string;
-}
-
 export interface RoomParticipant {
   id: string;
   name: string;
@@ -306,6 +295,7 @@ export interface StudyRoom {
   name: string;
   topic: string;
   isPrivate: boolean;
+  inviteCode?: string | null;
   passcode?: string;
   maxParticipants: number;
   participants: RoomParticipant[];

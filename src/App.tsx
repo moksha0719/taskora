@@ -4,7 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { FocusTimerProvider } from './context/FocusTimerContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AppShell } from './components/layout/AppShell';
-
+ 
 // Pages
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/auth/LoginPage';
@@ -16,7 +16,6 @@ import { CalendarPage } from './pages/CalendarPage';
 import { StudyPlannerPage } from './pages/StudyPlannerPage';
 import { FlashcardsPage } from './pages/FlashcardsPage';
 import { AIAssistantPage } from './pages/AIAssistantPage';
-import { BrainDumpPage } from './pages/BrainDumpPage';
 import { FocusPage } from './pages/FocusPage';
 import { HabitsPage } from './pages/HabitsPage';
 import { WorkspacePage } from './pages/WorkspacePage';
@@ -30,6 +29,7 @@ import { ThemeStudioPage } from './pages/ThemeStudioPage';
 import { AdminPage } from './pages/AdminPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { SharedNotePage } from './pages/SharedNotePage';
+import { JoinRoomPage } from './pages/JoinRoomPage';
 
 export const App: React.FC = () => {
   return (
@@ -44,6 +44,8 @@ export const App: React.FC = () => {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/shared-notes/:shareCode" element={<SharedNotePage />} />
+            <Route path="/join/:code" element={<JoinRoomPage />} />
+            <Route path="/join-room/:code" element={<JoinRoomPage />} />
 
             {/* Authenticated Application Shell */}
             <Route element={<AppShell />}>
@@ -53,7 +55,6 @@ export const App: React.FC = () => {
               <Route path="/study-planner" element={<StudyPlannerPage />} />
               <Route path="/flashcards" element={<FlashcardsPage />} />
               <Route path="/ai-assistant" element={<AIAssistantPage />} />
-              <Route path="/brain-dump" element={<BrainDumpPage />} />
               <Route path="/focus" element={<FocusPage />} />
               <Route path="/habits" element={<HabitsPage />} />
               <Route path="/workspace" element={<WorkspacePage />} />

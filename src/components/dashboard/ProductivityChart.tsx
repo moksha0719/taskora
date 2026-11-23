@@ -44,7 +44,7 @@ export const ProductivityChart: React.FC = () => {
   }, [period, reloadKey]);
 
   return (
-    <Card className="p-6 relative">
+    <Card className="relative rounded-3xl p-6 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base sm:text-lg font-bold font-heading text-deep-purple dark:text-white">
           Productivity Overview

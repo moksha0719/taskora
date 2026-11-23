@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { ProposalCard } from '../components/ai/ProposalCard';
@@ -9,6 +10,8 @@ import type { ChatMessage } from '../types';
 import { Bot, Send, Sparkles, User, Plus } from 'lucide-react';
 
 export const AIAssistantPage: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<AIConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -24,6 +27,13 @@ export const AIAssistantPage: React.FC = () => {
     'Suggest a daily 90-min coding & hydration habit',
     'Organize tasks for upcoming assignment deadline',
   ];
+
+  useEffect(() => {
+    const state = location.state as { initialPrompt?: unknown } | null;
+    if (typeof state?.initialPrompt !== 'string') return;
+    setInputPrompt(state.initialPrompt);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.key, location.pathname, location.state, navigate]);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +148,10 @@ export const AIAssistantPage: React.FC = () => {
         setError('The AI provider is unavailable (503). Please try again later.');
       } else if (cause instanceof ApiError && cause.status === 504) {
         setError('The AI provider timed out (504). Please try again.');
+      } else if (cause instanceof ApiError && cause.status === 502) {
+        setError(cause.message === 'AI returned an invalid response'
+          ? 'The AI response could not be formatted into task proposals. Please try again or rephrase your request.'
+          : 'The AI provider is temporarily unavailable (502). Please try again later.');
       } else {
         setError(cause instanceof Error ? cause.message : 'Unable to send your message.');
       }

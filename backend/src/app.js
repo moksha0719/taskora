@@ -6,8 +6,6 @@ const createAuthRouter = require("./routes/authRoutes");
 const createTaskRouter = require("./routes/taskRoutes");
 const createAiRouter = require("./routes/aiRoutes");
 const geminiService = require("./services/geminiService");
-const createBrainDumpRouter = require("./routes/brainDumpRoutes");
-const brainDumpService = require("./services/brainDumpService");
 const createStudyPlanRouter = require("./routes/studyPlanRoutes");
 const { createStudyPlanService } = require("./services/studyPlanService");
 const defaultStudyScheduleService = require("./services/studyScheduleService");
@@ -16,7 +14,6 @@ const createNotificationRouter = require("./routes/notificationRoutes");
 const { createNotificationService } = require("./services/notificationService");
 const { createTaskService } = require("./services/taskService");
 const { createAiConversationService } = require("./services/aiConversationService");
-const { createBrainDumpWorkflowService } = require("./services/brainDumpWorkflowService");
 const logSafeError = require("./lib/logSafeError");
 const createProductRouter = require("./routes/productRoutes");
 const { createFlashcardRouter } = require("./routes/flashcardRoutes");
@@ -25,10 +22,8 @@ const { createProfilePhotoStorage } = require("./services/profilePhotoStorage");
 function createApp({
     prismaClient = prisma,
     aiService = geminiService,
-    brainDumpProcessingService = brainDumpService,
     taskService,
     aiConversationService,
-    brainDumpWorkflowService,
     studyPlanService,
     studyScheduleService = defaultStudyScheduleService,
     scheduleCompletionService = defaultScheduleCompletionService,
@@ -44,11 +39,6 @@ function createApp({
     const conversations = aiConversationService || createAiConversationService({
         prismaClient,
         aiService,
-        taskService: tasks
-    });
-    const brainDumps = brainDumpWorkflowService || createBrainDumpWorkflowService({
-        prismaClient,
-        processingService: brainDumpProcessingService,
         taskService: tasks
     });
     const plans = studyPlanService || createStudyPlanService({
@@ -128,7 +118,6 @@ function createApp({
     app.use("/api/auth", createAuthRouter(prismaClient, undefined, photoStorage));
     app.use("/api/tasks", createTaskRouter(prismaClient, notifications, tasks));
     app.use("/api/ai", createAiRouter(aiService, conversations));
-    app.use("/api/brain-dumps", createBrainDumpRouter(brainDumpProcessingService, brainDumps));
     app.use(
         "/api/study-plans",
         createStudyPlanRouter(plans, studyScheduleService, scheduleCompletionService)

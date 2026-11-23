@@ -41,7 +41,7 @@ function createGeminiService({
     }),
     configProvider = getGeminiConfig
 } = {}) {
-    async function generateContent(contents) {
+    async function generateContent(contents, generationConfig) {
         if (typeof contents !== "string" || !contents.trim()) {
             throw new TypeError("Gemini input must be a non-empty string");
         }
@@ -55,10 +55,14 @@ function createGeminiService({
 
         try {
             const client = clientFactory(config.apiKey);
-            const response = await client.models.generateContent({
+            const request = {
                 model: config.model,
                 contents
-            });
+            };
+            if (generationConfig !== undefined) {
+                request.config = generationConfig;
+            }
+            const response = await client.models.generateContent(request);
 
             if (typeof response.text !== "string" || !response.text.trim()) {
                 throw new Error("Empty Gemini response");

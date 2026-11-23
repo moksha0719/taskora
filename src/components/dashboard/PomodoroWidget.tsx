@@ -55,7 +55,7 @@ export const PomodoroWidget: React.FC = () => {
   };
 
   return (
-    <Card className="p-6 relative flex flex-col justify-between">
+    <Card className="relative flex flex-col justify-between rounded-3xl p-6 shadow-sm transition-shadow hover:shadow-md">
       <div>
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">

@@ -5,10 +5,6 @@ const {
     createAiConversationService,
     validateAssistantOutput
 } = require("../src/services/aiConversationService");
-const {
-    createBrainDumpWorkflowService,
-    BrainDumpWorkflowServiceError
-} = require("../src/services/brainDumpWorkflowService");
 const { createTaskService } = require("../src/services/taskService");
 const { AiConversationServiceError } = require("../src/services/aiConversationService");
 
@@ -29,7 +25,8 @@ test("assistant action output rejects unsupported fields and invalid task values
         JSON.stringify({
             response: "Suggested action",
             proposals: [{ type: "CREATE_TASK", payload: { title: "Task", status: "COMPLETED" } }]
-        })
+        }),
+        "I can help you with that. Here are some ideas."
     ];
 
     for (const output of outputs) {
@@ -45,8 +42,6 @@ function createMemoryPrisma() {
         conversations: [],
         messages: [],
         assistantProposals: [],
-        brainDumps: [],
-        brainDumpProposals: [],
         tasks: []
     };
 
@@ -142,75 +137,6 @@ function createMemoryPrisma() {
                 return proposal;
             }
         },
-        brainDump: {
-            create: async ({ data }) => {
-                const now = new Date();
-                const brainDump = {
-                    id: randomUUID(),
-                    createdAt: now,
-                    updatedAt: now,
-                    userId: data.userId,
-                    inputText: data.inputText,
-                    summary: data.summary
-                };
-                state.brainDumps.push(brainDump);
-                const proposals = data.proposals.create.map((input) => {
-                    const proposal = {
-                        id: randomUUID(),
-                        brainDumpId: brainDump.id,
-                        userId: brainDump.userId,
-                        status: "PENDING",
-                        createdAt: now,
-                        ...input
-                    };
-                    state.brainDumpProposals.push(proposal);
-                    return proposal;
-                });
-                return { ...brainDump, proposals };
-            },
-            findFirst: async ({ where, include }) => {
-                const brainDump = state.brainDumps.find(
-                    (item) => item.id === where.id && item.userId === where.userId
-                );
-                if (!brainDump) {
-                    return null;
-                }
-                return include
-                    ? {
-                        ...brainDump,
-                        proposals: state.brainDumpProposals.filter(
-                            (item) => item.brainDumpId === brainDump.id
-                        )
-                    }
-                    : brainDump;
-            }
-        },
-        brainDumpTaskProposal: {
-            findFirst: async ({ where }) => state.brainDumpProposals.find(
-                (item) =>
-                    item.id === where.id &&
-                    item.brainDumpId === where.brainDumpId &&
-                    item.userId === where.userId
-            ) || null,
-            updateMany: async ({ where, data }) => {
-                const proposal = state.brainDumpProposals.find((item) =>
-                    item.id === where.id &&
-                    item.brainDumpId === where.brainDumpId &&
-                    item.userId === where.userId &&
-                    item.status === where.status
-                );
-                if (!proposal) {
-                    return { count: 0 };
-                }
-                Object.assign(proposal, data);
-                return { count: 1 };
-            },
-            update: async ({ where, data }) => {
-                const proposal = state.brainDumpProposals.find((item) => item.id === where.id);
-                Object.assign(proposal, data);
-                return proposal;
-            }
-        },
         task: {
             create: async ({ data, select }) => {
                 const task = {
@@ -236,14 +162,20 @@ function createMemoryPrisma() {
 test("AI conversations persist messages and proposals; only the owner can explicitly resolve them", async () => {
     const { client, state } = createMemoryPrisma();
     const taskService = createTaskService({ prismaClient: client });
+    let receivedPrompt;
+    let receivedGenerationConfig;
     const aiService = {
-        generateContent: async () => JSON.stringify({
-            response: "I can prepare these tasks for review.",
-            proposals: [
-                { type: "CREATE_TASK", payload: { title: "Review notes", priority: "HIGH" } },
-                { type: "CREATE_TASK", payload: { title: "Plan study time", priority: "LOW" } }
-            ]
-        })
+        generateContent: async (prompt, generationConfig) => {
+            receivedPrompt = prompt;
+            receivedGenerationConfig = generationConfig;
+            return JSON.stringify({
+                response: "I can prepare these tasks for review.",
+                proposals: [
+                    { type: "CREATE_TASK", payload: { title: "Review notes", priority: "HIGH" } },
+                    { type: "CREATE_TASK", payload: { title: "Plan study time", priority: "LOW" } }
+                ]
+            });
+        }
     };
     const service = createAiConversationService({
         prismaClient: client,
@@ -255,6 +187,9 @@ test("AI conversations persist messages and proposals; only the owner can explic
     const conversation = await service.createConversation(USER_A, { title: "Study plan" });
     const result = await service.sendMessage(USER_A, conversation.id, { message: "Help me plan" });
 
+    assert.match(receivedPrompt, /Return only valid JSON with no Markdown fences/);
+    assert.match(receivedPrompt, /match any requested task count up to 5/);
+    assert.deepEqual(receivedGenerationConfig, { responseMimeType: "application/json" });
     assert.equal(state.messages.length, 2);
     assert.deepEqual(state.messages.map((message) => message.role), ["USER", "ASSISTANT"]);
     assert.equal(result.proposals.length, 2);
@@ -285,62 +220,6 @@ test("AI conversations persist messages and proposals; only the owner can explic
     await assert.rejects(
         service.approveProposal(USER_A, result.proposals[0].id),
         (error) => error instanceof AiConversationServiceError && error.status === 409
-    );
-    assert.equal(state.tasks.length, 1);
-});
-
-test("Brain Dumps persist validated output and create tasks only after owner approval", async () => {
-    const { client, state } = createMemoryPrisma();
-    const taskService = createTaskService({ prismaClient: client });
-    const workflow = createBrainDumpWorkflowService({
-        prismaClient: client,
-        processingService: {
-            processText: async () => ({
-                summary: "Prepare for exams.",
-                tasks: [
-                    { title: "Review biology", priority: "HIGH", dueDate: "2026-12-01" },
-                    { title: "Organize notes", priority: "MEDIUM", description: "Sort by topic" }
-                ]
-            })
-        },
-        taskService
-    });
-
-    const saved = await workflow.createBrainDump(USER_A, "  Biology exam and notes  ");
-    assert.equal(saved.inputText, "Biology exam and notes");
-    assert.equal(saved.summary, "Prepare for exams.");
-    assert.equal(saved.proposals.length, 2);
-    assert.equal(state.tasks.length, 0);
-
-    await assert.rejects(
-        workflow.getBrainDump(USER_B, saved.id),
-        (error) => error instanceof BrainDumpWorkflowServiceError && error.status === 404
-    );
-    await assert.rejects(
-        workflow.approveTaskProposal(USER_B, saved.id, saved.proposals[0].id),
-        (error) => error instanceof BrainDumpWorkflowServiceError && error.status === 404
-    );
-    assert.equal(state.tasks.length, 0);
-
-    const approved = await workflow.approveTaskProposal(
-        USER_A,
-        saved.id,
-        saved.proposals[0].id
-    );
-    assert.equal(approved.proposal.status, "APPROVED");
-    assert.equal(approved.proposal.approvedTaskId, approved.task.id);
-    assert.equal(approved.task.dueDate.toISOString(), "2026-12-01T00:00:00.000Z");
-    assert.equal(state.tasks.length, 1);
-    const rejected = await workflow.rejectTaskProposal(
-        USER_A,
-        saved.id,
-        saved.proposals[1].id
-    );
-    assert.equal(rejected.status, "REJECTED");
-    assert.equal(state.tasks.length, 1);
-    await assert.rejects(
-        workflow.approveTaskProposal(USER_A, saved.id, saved.proposals[0].id),
-        (error) => error instanceof BrainDumpWorkflowServiceError && error.status === 409
     );
     assert.equal(state.tasks.length, 1);
 });

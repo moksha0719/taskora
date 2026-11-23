@@ -6,7 +6,10 @@ const createApp = require("../src/app");
 const { getGeminiConfig } = require("../src/config/gemini");
 const { JWT_AUDIENCE, JWT_ISSUER } = require("../src/config/auth");
 const { createGeminiService, GeminiServiceError } = require("../src/services/geminiService");
-const { createAiConversationService } = require("../src/services/aiConversationService");
+const {
+    AiConversationServiceError,
+    createAiConversationService
+} = require("../src/services/aiConversationService");
 
 const TEST_SECRET = "ai-api-test-secret-with-at-least-32-bytes";
 const TEST_USER_ID = "33333333-3333-4333-8333-333333333333";
@@ -110,6 +113,35 @@ test("assistant endpoint persists messages when given an owned conversation ID",
             input: { message: "Help me plan" }
         });
     }, conversationService);
+});
+
+test("assistant endpoint returns a safe error for invalid structured AI output", async () => {
+    const conversationService = {
+        sendMessage: async () => {
+            throw new AiConversationServiceError(
+                "AI returned an invalid response",
+                "INVALID_AI_OUTPUT",
+                502
+            );
+        }
+    };
+
+    await withServer(
+        mockedGeminiService(async () => ({ text: "Unused" })),
+        async (request) => {
+            const response = await request(
+                "/api/ai/assistant",
+                assistantRequest("Break down my exam prep", {
+                    conversationId: TEST_CONVERSATION_ID
+                })
+            );
+            assert.equal(response.status, 502);
+            assert.deepEqual(await response.json(), {
+                error: "AI returned an invalid response"
+            });
+        },
+        conversationService
+    );
 });
 
 test("assistant route returns a safe 503 when the Gemini key or model is missing", async () => {

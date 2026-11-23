@@ -1,6 +1,6 @@
 # Phase 06 Study Planner API Contract
 
-For authentication, task, AI Assistant, Brain Dump, health, and frontend compatibility details, see the [Taskora Backend API Contract](./backend-api-contract.md).
+For authentication, task, AI Assistant, health, and frontend compatibility details, see the [Taskora Backend API Contract](./backend-api-contract.md).
 
 Base path: `/api/study-plans`
 

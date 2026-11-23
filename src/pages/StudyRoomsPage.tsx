@@ -6,11 +6,14 @@ import { Modal } from '../components/common/Modal';
 import { MascotBunny } from '../components/common/MascotBunny';
 import { ApiError, roomsApi } from '../lib/api/client';
 import { StudyRoom } from '../types';
-import { Users, Lock, Unlock, Play, Pause, RotateCcw, MessageSquare, Send, Plus, ArrowLeft, Volume2, Pencil, Trash2 } from 'lucide-react';
+import { Users, Lock, Unlock, Play, Pause, RotateCcw, MessageSquare, Send, Plus, ArrowLeft, Volume2, Pencil, Trash2, Copy } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 export const StudyRoomsPage: React.FC = () => {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [rooms, setRooms] = useState<StudyRoom[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [roomsError, setRoomsError] = useState<string | null>(null);
@@ -22,6 +25,7 @@ export const StudyRoomsPage: React.FC = () => {
   const [roomActionBusy, setRoomActionBusy] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Chat message input
   const [chatInput, setChatInput] = useState('');
@@ -42,7 +46,7 @@ export const StudyRoomsPage: React.FC = () => {
       const data = await roomsApi.getRooms();
       setRooms(data);
       setActiveRoom((currentRoom) => currentRoom
-        ? data.find((room) => room.id === currentRoom.id) || null
+        ? data.find((room) => room.id === currentRoom.id) || (currentRoom.isPrivate ? currentRoom : null)
         : null);
       return data;
     } catch (cause) {
@@ -56,6 +60,26 @@ export const StudyRoomsPage: React.FC = () => {
   useEffect(() => {
     void fetchRooms();
   }, []);
+
+  useEffect(() => {
+    const state = location.state as {
+      joinedRoomId?: string;
+      joinedRoom?: StudyRoom;
+      successMessage?: string;
+    } | null;
+    if (!state?.joinedRoom && !state?.successMessage) return;
+    if (state.joinedRoom && (!state.joinedRoomId || state.joinedRoom.id === state.joinedRoomId)) {
+      setActiveRoom(state.joinedRoom);
+    }
+    if (state.successMessage) setSuccessToast(state.successMessage);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.key, location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    if (!successToast) return;
+    const timeout = window.setTimeout(() => setSuccessToast(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [successToast]);
 
   useEffect(() => {
     if (!activeRoom) return;
@@ -174,23 +198,34 @@ export const StudyRoomsPage: React.FC = () => {
 
   const handleLeaveRoom = async () => {
     if (!activeRoom) return;
-    const isOwner = activeRoom.ownerId === user?.id;
-    if (isOwner && !window.confirm('Delete this room and its messages? Room owners cannot leave while keeping the room open.')) return;
     setRoomActionBusy(true);
     setRoomActionError(null);
     try {
-      if (isOwner) await roomsApi.deleteRoom(activeRoom.id);
-      else {
-        await roomsApi.leaveRoom(activeRoom.id);
-        const roomId = activeRoom.id;
-        setRooms((currentRooms) => currentRooms.map((room) => room.id === roomId
-          ? { ...room, participants: room.participants.filter((participant) => participant.id !== user?.id) }
-          : room));
-      }
+      await roomsApi.leaveRoom(activeRoom.id);
+      const roomId = activeRoom.id;
+      setRooms((currentRooms) => currentRooms.map((room) => room.id === roomId
+        ? { ...room, participants: room.participants.filter((participant) => participant.id !== user?.id) }
+        : room));
       setActiveRoom(null);
       await fetchRooms(false);
     } catch (cause) {
       setRoomActionError(cause instanceof Error ? cause.message : 'Unable to leave this room.');
+    } finally {
+      setRoomActionBusy(false);
+    }
+  };
+
+  const handleDeleteRoom = async () => {
+    if (!activeRoom) return;
+    if (!window.confirm('Delete this room and its messages? Room owners cannot leave while keeping the room open.')) return;
+    setRoomActionBusy(true);
+    setRoomActionError(null);
+    try {
+      await roomsApi.deleteRoom(activeRoom.id);
+      setActiveRoom(null);
+      await fetchRooms(false);
+    } catch (cause) {
+      setRoomActionError(cause instanceof Error ? cause.message : 'Unable to delete this room.');
     } finally {
       setRoomActionBusy(false);
     }
@@ -232,6 +267,19 @@ export const StudyRoomsPage: React.FC = () => {
     }
   };
 
+  const handleCopyInviteLink = async () => {
+    if (!activeRoom?.inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/join/${activeRoom.inviteCode}`);
+      setRoomActionError(null);
+      setSuccessToast('Link Copied!');
+    } catch (cause) {
+      setRoomActionError(cause instanceof Error
+        ? `Unable to copy the invite link: ${cause.message}`
+        : 'Unable to copy the invite link.');
+    }
+  };
+
   const formatRoomTimer = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const remainder = seconds % 60;
@@ -249,6 +297,15 @@ export const StudyRoomsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
+      {successToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed right-4 top-4 z-[70] rounded-2xl bg-deep-purple px-4 py-3 text-sm font-semibold text-white shadow-lg"
+        >
+          {successToast}
+        </div>
+      )}
       {/* If inside an active study room */}
       {activeRoom ? (
         <div className="space-y-6">
@@ -256,7 +313,7 @@ export const StudyRoomsPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-subtle">
             <div className="flex items-center gap-3">
               <button
-                onClick={() => void handleLeaveRoom()}
+                onClick={() => void (isRoomOwner ? handleDeleteRoom() : handleLeaveRoom())}
                 disabled={roomActionBusy}
                 className="p-2.5 rounded-2xl bg-white dark:bg-[#1E163B] border border-subtle text-muted-purple hover:text-primary transition-colors"
                 aria-label={isRoomOwner ? 'Delete room' : 'Leave room'}
@@ -279,6 +336,17 @@ export const StudyRoomsPage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2">
+              {activeRoom.isPrivate && activeRoom.inviteCode && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  pill
+                  disabled={roomActionBusy}
+                  onClick={() => void handleCopyInviteLink()}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy Invite Link
+                </Button>
+              )}
               {isRoomOwner && (
                 <Button variant="outline" size="sm" pill disabled={roomActionBusy} onClick={() => {
                   setRoomName(activeRoom.name);
@@ -296,7 +364,7 @@ export const StudyRoomsPage: React.FC = () => {
                 size="sm"
                 pill
                 disabled={roomActionBusy}
-                onClick={() => void handleLeaveRoom()}
+                onClick={() => void (isRoomOwner ? handleDeleteRoom() : handleLeaveRoom())}
                 className="text-xs text-rose-500 hover:bg-rose-50 border-rose-200"
               >
                 {isRoomOwner ? <Trash2 className="h-3.5 w-3.5" /> : <ArrowLeft className="h-3.5 w-3.5" />}
