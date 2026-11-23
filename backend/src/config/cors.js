@@ -40,6 +40,11 @@ function parseAllowedOrigins(value) {
 
 function createCorsPolicy(env = process.env) {
     const allowedOrigins = parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS);
+
+    allowedOrigins.add("https://taskora-frontend-seven.vercel.app");
+    allowedOrigins.add("http://localhost:5173");
+    allowedOrigins.add("http://localhost:3000");
+
     const allowAnyOrigin = env.NODE_ENV !== "production" &&
         (!env.CORS_ALLOWED_ORIGINS || !env.CORS_ALLOWED_ORIGINS.trim());
 
