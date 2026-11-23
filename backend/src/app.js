@@ -68,6 +68,13 @@ function createApp({
         res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
         next();
     });
+    if (env.TRUST_PROXY_HOPS !== undefined) {
+        const trustedProxyHops = Number(env.TRUST_PROXY_HOPS);
+        if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1) {
+            throw new Error("TRUST_PROXY_HOPS must be a positive integer");
+        }
+        app.set("trust proxy", trustedProxyHops);
+    }
 
     app.use(corsPolicy.rejectUnapprovedOrigin);
     app.use(cors({ origin: corsPolicy.corsOrigin }));

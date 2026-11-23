@@ -137,6 +137,10 @@ For backend-specific installation, environment variable names, database setup,
 Docker development, production migration order, and troubleshooting, see the
 [backend deployment guide](./backend/README.md).
 
+For the Vercel + Railway production setup, including domain, CORS, environment
+variables, migrations, and deployment verification, see the
+[deployment guide](./DEPLOYMENT.md).
+
 ## Environment variables
 
 The root [.env.example](./.env.example) contains frontend settings. Backend secrets and database settings belong in `backend/.env`, based on [backend/.env.example](./backend/.env.example). Do not commit `.env` files or paste secret values into this README.

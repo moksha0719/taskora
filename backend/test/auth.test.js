@@ -49,8 +49,8 @@ function createPrismaMock(initialUser = null) {
     };
 }
 
-async function withServer(prisma, run) {
-    const server = createApp({ prismaClient: prisma }).listen(0);
+async function withServer(prisma, run, env = { NODE_ENV: "test" }) {
+    const server = createApp({ prismaClient: prisma, env }).listen(0);
     await once(server, "listening");
     const address = server.address();
     const request = (path, options = {}) => fetch(`http://127.0.0.1:${address.port}${path}`, options);
@@ -367,4 +367,23 @@ test("password change rejects oversized current passwords before querying user d
         });
     });
     assert.equal(userLookups, 0);
+});
+
+test("production authentication limits use client IPs forwarded by the trusted proxy", async () => {
+    await withServer(createPrismaMock(), async (request) => {
+        const requestFrom = (ip) => request("/api/auth/login", jsonRequest({}, {
+            Origin: "https://taskora.com",
+            "X-Forwarded-For": ip
+        }));
+
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+            assert.equal((await requestFrom("203.0.113.10")).status, 400);
+        }
+        assert.equal((await requestFrom("203.0.113.11")).status, 400);
+        assert.equal((await requestFrom("203.0.113.10")).status, 429);
+    }, {
+        NODE_ENV: "production",
+        CORS_ALLOWED_ORIGINS: "https://taskora.com",
+        TRUST_PROXY_HOPS: "1"
+    });
 });

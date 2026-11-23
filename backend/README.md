@@ -47,6 +47,7 @@ frontend variables.
 | `PASSWORD_RESET_DELIVERY_SIGNING_SECRET` | Optional HMAC-SHA256 signing secret for reset-delivery payloads. |
 | `PASSWORD_RESET_DELIVERY_TIMEOUT_MS` | Legacy alias for `EMAIL_DELIVERY_TIMEOUT_MS`; retained for existing webhook deployments. |
 | `CORS_ALLOWED_ORIGINS` | Optional in development; comma-separated exact origins allowed by CORS. In production, configure the deployed frontend origin or browser requests with an `Origin` header are denied. |
+| `TRUST_PROXY_HOPS` | Optional; positive number of trusted reverse-proxy hops. Set to `1` when deployed behind Railway's public proxy so IP-based rate limits use the client IP. Leave unset when directly exposed. |
 | `POSTGRES_USER` | Required by the development Compose file. |
 | `POSTGRES_PASSWORD` | Required by the development Compose file. |
 | `POSTGRES_DB` | Optional in Compose; defaults to `taskora_db`. |
@@ -444,6 +445,12 @@ that have become overdue while the scheduler was down.
 - **Dependency audit:** Run `npm audit` and `npm audit --omit=dev` from
   `backend/` before releases. Audit results apply to the checked-in dependency
   lockfile and should be refreshed when dependencies change.
+- **Dependency audit notices:** `npm audit --omit=dev` currently reports 4
+  high-severity findings in the Prisma CLI dependency tree (`deepmerge-ts` and
+  `effect`). The suggested automatic fix upgrades Prisma to a breaking major
+  version; do not apply it without planning and validating a Prisma migration.
+  Evaluate a compatible patched release or a separate migration runner before
+  public production deployment.
 
 Production deployment has not been tested against a production server or
 database.
