@@ -44,7 +44,7 @@ export const ProductivityChart: React.FC = () => {
   }, [period, reloadKey]);
 
   return (
-    <Card className="relative rounded-3xl p-6 shadow-sm transition-shadow hover:shadow-md">
+    <Card className="relative min-w-0 rounded-3xl p-4 sm:p-6 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base sm:text-lg font-bold font-heading text-deep-purple dark:text-white">
           Productivity Overview
@@ -64,7 +64,7 @@ export const ProductivityChart: React.FC = () => {
         </div>
       </div>
 
-      <div className="h-64 sm:h-72 w-full relative">
+      <div className="h-64 sm:h-72 w-full relative overflow-x-auto">
         {loading ? (
           <div className="h-full flex items-center justify-center text-xs text-muted-purple" role="status">
             Loading productivity data...
@@ -85,6 +85,7 @@ export const ProductivityChart: React.FC = () => {
             <div className="absolute right-12 sm:right-24 top-6 z-10 hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/15 text-primary text-xs font-bold shadow-sm backdrop-blur-xs animate-bounce-subtle border border-primary/20">
               <span>Focus minutes</span>
             </div>
+            <div className="h-full min-w-[420px] sm:min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={chartData}
@@ -139,6 +140,7 @@ export const ProductivityChart: React.FC = () => {
                 />
               </AreaChart>
             </ResponsiveContainer>
+            </div>
           </>
         )}
       </div>

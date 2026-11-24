@@ -105,10 +105,10 @@ export const DashboardPage: React.FC = () => {
       )}
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           {isWidgetEnabled('productivity_chart') && <ProductivityChart />}
         </div>
-        <div>
+        <div className="min-w-0">
           {isWidgetEnabled('today_tasks') && (
             <TodoWidget
               onOpenCreateModal={() => setIsCreateTaskModalOpen(true)}

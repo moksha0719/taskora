@@ -62,9 +62,9 @@ export const DashboardStatsRow: React.FC<DashboardStatsRowProps> = ({ refreshKey
   if (loading) {
     return (
       <section aria-label="Dashboard statistics" role="status">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {statStyles.map(({ icon: Icon, iconClass }, index) => (
-            <Card key={index} hover={false} className="flex items-center gap-4 rounded-3xl p-6 shadow-sm">
+            <Card key={index} hover={false} className="flex items-center gap-4 rounded-3xl p-4 md:p-6 shadow-sm">
               <span className={`flex h-12 w-12 animate-pulse items-center justify-center rounded-2xl ${iconClass}`}>
                 <Icon className="h-6 w-6 opacity-40" />
               </span>
@@ -114,11 +114,11 @@ export const DashboardStatsRow: React.FC<DashboardStatsRowProps> = ({ refreshKey
 
   return (
     <section aria-label="Dashboard statistics">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {cards.map(({ title, value, detail, icon }) => {
           const Icon = icon.icon;
           return (
-            <Card key={title} hover={false} className="group flex items-center gap-4 rounded-3xl p-6 shadow-sm transition-shadow hover:shadow-md">
+            <Card key={title} hover={false} className="group flex items-center gap-4 rounded-3xl p-4 md:p-6 shadow-sm transition-shadow hover:shadow-md">
               <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${icon.iconClass}`}>
                 <Icon className="h-6 w-6" />
               </span>

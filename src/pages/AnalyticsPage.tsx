@@ -184,7 +184,7 @@ export const AnalyticsPage: React.FC = () => {
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Focus Hours Trend Area Chart (8 cols) */}
-        <Card className="lg:col-span-8 p-6">
+        <Card className="min-w-0 lg:col-span-8 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white">
@@ -195,7 +195,8 @@ export const AnalyticsPage: React.FC = () => {
             <Badge variant="primary">{period === '7d' ? 'Last 7 days' : period === '30d' ? 'Last 30 days' : 'Semester'}</Badge>
           </div>
 
-          <div className="h-72 w-full">
+          <div className="h-72 w-full overflow-x-auto">
+            <div className="h-full min-w-[420px] sm:min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={weekData}>
                 <defs>
@@ -217,18 +218,20 @@ export const AnalyticsPage: React.FC = () => {
                 />
               </AreaChart>
             </ResponsiveContainer>
+            </div>
           </div>
         </Card>
 
         {/* Subject Allocation Pie Chart (4 cols) */}
-        <Card className="lg:col-span-4 p-6 flex flex-col justify-between">
+        <Card className="min-w-0 lg:col-span-4 p-4 sm:p-6 flex flex-col justify-between">
           <div>
             <h3 className="text-base font-bold font-heading text-deep-purple dark:text-white mb-1">
               Subject Distribution
             </h3>
             <p className="text-xs text-muted-purple mb-4">Time split by academic course</p>
 
-            <div className="h-48 w-full">
+            <div className="h-48 w-full overflow-x-auto">
+              <div className="h-full min-w-[320px] sm:min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -248,6 +251,7 @@ export const AnalyticsPage: React.FC = () => {
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
+              </div>
             </div>
           </div>
 

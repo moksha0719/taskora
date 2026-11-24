@@ -34,9 +34,9 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-dream-bg dark:bg-[#130E26] flex items-center justify-center p-4 sm:p-6 selection:bg-primary/20">
-      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 rounded-4xl bg-white dark:bg-[#1E163B] border border-subtle shadow-lavender-lg overflow-hidden">
+      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 rounded-4xl bg-white dark:bg-[#1E163B] border border-subtle shadow-lavender-lg overflow-hidden">
         {/* Left Side: Mascot & Motivational Panel */}
-        <div className="bg-gradient-to-br from-primary-subtle via-[#FAF6FE] to-soft-pink/40 dark:from-[#181131] dark:to-[#2B1D3D] p-8 sm:p-12 flex flex-col justify-between items-center text-center border-b md:border-b-0 md:border-r border-subtle">
+        <div className="hidden lg:flex bg-gradient-to-br from-primary-subtle via-[#FAF6FE] to-soft-pink/40 dark:from-[#181131] dark:to-[#2B1D3D] p-8 sm:p-12 flex-col justify-between items-center text-center border-b md:border-b-0 md:border-r border-subtle">
           <div className="flex items-center gap-2 self-start">
             <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center text-white">
               <MascotBunny mood="happy" size={26} showSparkles={false} />
@@ -62,7 +62,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* Right Side: Sign-in Form */}
-        <div className="p-8 sm:p-12 flex flex-col justify-center">
+        <div className="p-6 sm:p-12 flex flex-col justify-center">
           <div className="mb-6">
             <h3 className="text-2xl font-bold font-heading text-deep-purple dark:text-white">
               Sign In

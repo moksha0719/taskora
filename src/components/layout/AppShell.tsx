@@ -24,13 +24,13 @@ export const AppShell: React.FC = () => {
   return (
     <div className="flex h-screen overflow-hidden bg-dream-bg dark:bg-[#130E26]">
       {/* Desktop Sidebar */}
-      <div className="hidden lg:block h-full">
+      <div className="hidden md:flex h-full">
         <Sidebar className="h-full" />
       </div>
 
       {/* Mobile Drawer Overlay */}
       {mobileNavOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+        <div className="fixed inset-0 z-50 flex md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
           <div
             className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
             onClick={() => setMobileNavOpen(false)}
@@ -54,7 +54,7 @@ export const AppShell: React.FC = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         <TopBar onToggleMobileNav={() => setMobileNavOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 custom-scrollbar">
           <div className="max-w-7xl mx-auto">
             <Outlet />
           </div>
